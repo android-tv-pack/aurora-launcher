@@ -14,7 +14,7 @@ It is a personal project, built and tested on a Xiaomi TV Box S (3rd gen, Androi
 
 ## Credits and license
 
-Aurora contains the AirPlay receiver by **jqssun**, [android-airplay-server](https://github.com/jqssun/android-airplay-server), which is based on [UxPlay](https://github.com/FDH2/UxPlay) and is licensed **GPLv3**. Because of that, **Aurora is licensed under the GNU GPL v3** as well; see [LICENSE](LICENSE). The receiver's Kotlin sources are copied into `app/src/main/kotlin/io/github/jqssun/airplay`, and its native code is built from the `third_party/android-airplay-server` submodule (this organisation's fork of the upstream project).
+Aurora contains the AirPlay receiver by **jqssun**, [android-airplay-server](https://github.com/jqssun/android-airplay-server), which is based on [UxPlay](https://github.com/FDH2/UxPlay) and is licensed **GPLv3**. Because of that, **Aurora is licensed under the GNU GPL v3** as well; see [LICENSE](LICENSE). The receiver's Kotlin sources are copied into `app/src/main/kotlin/io/github/jqssun/airplay`, and its native code is built from the `third_party/android-airplay-server` submodule (the upstream project, pinned to a fixed commit).
 
 ## Build
 
@@ -39,7 +39,7 @@ The build targets only `armeabi-v7a` (32-bit); add `arm64-v8a` to `abiFilters` i
 
 To update, install the new APK over the old one: settings and hidden apps are kept, because every release is signed with the same key. (If you build and sign it yourself, remove the old copy first, as the signature differs.)
 
-The standalone AirPlay receiver is not needed any more, Aurora has it built in. Its own APK is on the [airplay-server releases](https://github.com/android-tv-pack/airplay-server/releases).
+The standalone AirPlay receiver is not needed any more, Aurora has it built in. Its own APK is on the [upstream releases page](https://github.com/jqssun/android-airplay-server/releases).
 
 **Works right after installing:** the home styles, themes, icon styles, weather, hidden apps, settings backup, the screensaver and the visualizer scenes (Desert, Cyberpunk, Tron Legacy, Matrix, Blade Runner, Interstellar), which also animate on their own when nothing plays.
 
