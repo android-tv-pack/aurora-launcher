@@ -68,3 +68,9 @@ The grants survive updates. Do not `pm clear` Aurora: that wipes the hidden apps
 - The real remote's Home key and hold-Home were only verified through the redirect path, not on a physical remote press.
 - Visualizers were checked on screen with generated test tracks, not judged over long listening.
 - YouTube Music publishes no playlists to the TV home, so only Now Playing works for it.
+
+## Support
+
+If this project is useful to you, you can support its development:
+
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/G0U5290K4T)
