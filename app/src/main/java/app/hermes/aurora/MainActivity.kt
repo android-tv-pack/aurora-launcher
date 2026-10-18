@@ -110,6 +110,8 @@ class MainActivity : Activity() {
     private val tiles = LinkedHashMap<String, View>()
     private var loading = false
     private var dirty = false
+    /** the installed launcher entries as of the last load: apps installed while Aurora was in the background are noticed by comparing */
+    @Volatile private var appsSig = ""
 
     // all sizes are relative to a 540-unit-high screen so the layout looks the same at any density
     private var unit = 1f
@@ -217,6 +219,7 @@ class MainActivity : Activity() {
         refreshWeather(false)
         loadFeed()
         if (dirty) reload(null)
+        else if (apps.isNotEmpty() && panel == null && launcherSig() != appsSig) reload(null)
         else if (apps.isNotEmpty() && panel == null && renderedRecents != store.recents.joinToString("\n")) {
             // coming back from an app: show the updated RECENT row
             render(null)
@@ -380,7 +383,9 @@ class MainActivity : Activity() {
         if (loading) return
         loading = true
         Thread {
+            val sig = launcherSig()
             val list = try { queryApps() } catch (e: Exception) { emptyList() }
+            appsSig = sig
             runOnUiThread {
                 loading = false
                 if (isDestroyed) return@runOnUiThread
@@ -402,6 +407,14 @@ class MainActivity : Activity() {
         AppEntry("$pkg/googletv", pkg, "Google TV", i, ai.loadBanner(packageManager),
             IconStyles.apply(resources, ai.loadIcon(packageManager), store.iconStyle, accent), true)
     } catch (e: Exception) { null }
+
+    /** cheap fingerprint of every app that has a launcher entry */
+    private fun launcherSig(): String = try {
+        val pm = packageManager
+        (pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER), 0) +
+            pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0))
+            .map { it.activityInfo.packageName + "/" + it.activityInfo.name }.sorted().joinToString("|")
+    } catch (e: Exception) { "" }
 
     private fun queryApps(): List<AppEntry> {
         val pm = packageManager
@@ -1199,7 +1212,7 @@ class MainActivity : Activity() {
             if (first == null) first = line
         }
         col.addView(TextView(this).apply {
-            text = "Aurora 3.16  ·  free, no ads, no account"
+            text = "Aurora 3.17  ·  free, no ads, no account"
             setTextSize(TypedValue.COMPLEX_UNIT_PX, u(10).toFloat())
             setTextColor(Color.argb(110, 255, 255, 255))
             setPadding(u(6), u(10), 0, 0)
