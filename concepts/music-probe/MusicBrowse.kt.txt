@@ -1,0 +1,115 @@
+package app.hermes.aurora
+
+import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
+import android.media.browse.MediaBrowser
+import android.net.Uri
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
+
+/**
+ * Music apps expose their library (playlists, favourites, new releases ...) through a
+ * MediaBrowserService, the same interface car head units use. This asks that service for the
+ * top-level sections and the first items of each one. Whatever the app refuses to share with a
+ * third-party caller (or needs a login for) simply comes back empty.
+ */
+internal object MusicBrowse {
+    private const val TAG = "AuroraMusic"
+
+    class Entry(val id: String, val title: String, val sub: String, val art: String?, val browsable: Boolean, val playable: Boolean)
+    class Shelf(val title: String, val id: String, val items: List<Entry>)
+    class Result(val pkg: String, val shelves: List<Shelf>, val note: String)
+
+    private val main = Handler(Looper.getMainLooper())
+
+    /** the app's browse service, or null when it isn't a music app */
+    fun service(ctx: Context, pkg: String): ComponentName? {
+        val i = Intent("android.media.browse.MediaBrowserService").setPackage(pkg)
+        val r = ctx.packageManager.queryIntentServices(i, 0).firstOrNull() ?: return null
+        return ComponentName(r.serviceInfo.packageName, r.serviceInfo.name)
+    }
+
+    private fun entry(m: MediaBrowser.MediaItem): Entry {
+        val d = m.description
+        return Entry(
+            d.mediaId ?: "", d.title?.toString() ?: "", d.subtitle?.toString() ?: "",
+            (d.iconUri ?: d.mediaUri)?.toString(), m.isBrowsable, m.isPlayable
+        )
+    }
+
+    /** Calls back on the main thread, at most once. */
+    fun load(ctx: Context, pkg: String, maxShelves: Int = 5, cb: (Result) -> Unit) {
+        val comp = service(ctx, pkg)
+        if (comp == null) { cb(Result(pkg, emptyList(), "no browse service")); return }
+        var done = false
+        var browser: MediaBrowser? = null
+        val shelves = ArrayList<Shelf>()
+        fun finish(note: String) {
+            if (done) return
+            done = true
+            main.removeCallbacksAndMessages(this)
+            try { browser?.disconnect() } catch (_: Exception) {}
+            Log.d(TAG, "$pkg -> ${shelves.size} shelves: $note")
+            cb(Result(pkg, shelves, note))
+        }
+        main.postAtTime({ finish("timeout") }, this, android.os.SystemClock.uptimeMillis() + 9000)
+
+        val cbs = object : MediaBrowser.ConnectionCallback() {
+            override fun onConnected() {
+                val b = browser ?: return
+                val root = b.root
+                Log.d(TAG, "$pkg connected, root=$root extras=${b.extras}")
+                b.subscribe(root, object : MediaBrowser.SubscriptionCallback() {
+                    override fun onChildrenLoaded(parentId: String, children: MutableList<MediaBrowser.MediaItem>) {
+                        val top = children.map { entry(it) }
+                        Log.d(TAG, "ROOT children (${top.size}): " + top.joinToString { "${it.title}[${it.id}${if (it.browsable) ",B" else ""}${if (it.playable) ",P" else ""}]" })
+                        val sections = top.filter { it.browsable }.take(maxShelves)
+                        if (sections.isEmpty()) {
+                            if (top.isNotEmpty()) shelves.add(Shelf("", parentId, top))
+                            finish("root only"); return
+                        }
+                        var pending = sections.size
+                        for (sec in sections) {
+                            b.subscribe(sec.id, object : MediaBrowser.SubscriptionCallback() {
+                                override fun onChildrenLoaded(pid: String, kids: MutableList<MediaBrowser.MediaItem>) {
+                                    val items = kids.map { entry(it) }
+                                    Log.d(TAG, "SECTION '${sec.title}' (${items.size}): " + items.take(8).joinToString { "${it.title}[${it.id}${if (it.browsable) ",B" else ""}${if (it.playable) ",P" else ""}]" })
+                                    if (items.isNotEmpty()) shelves.add(Shelf(sec.title, sec.id, items))
+                                    if (--pending == 0) finish("ok")
+                                }
+                                override fun onError(pid: String) {
+                                    Log.d(TAG, "SECTION '${sec.title}' error")
+                                    if (--pending == 0) finish("ok (some failed)")
+                                }
+                            })
+                        }
+                    }
+                    override fun onError(parentId: String) { finish("root error") }
+                })
+            }
+            override fun onConnectionFailed() { Log.d(TAG, "$pkg connection failed"); finish("connection failed") }
+            override fun onConnectionSuspended() { finish("suspended") }
+        }
+        try {
+            browser = MediaBrowser(ctx, comp, cbs, null)
+            browser.connect()
+        } catch (e: Exception) {
+            Log.d(TAG, "connect threw $e"); finish("error: $e")
+        }
+    }
+
+    /** Opens a playlist / album / track in the music app itself. */
+    fun open(ctx: Context, pkg: String, id: String): Boolean {
+        val tries = ArrayList<Intent>()
+        if (id.contains(":") || id.startsWith("http")) {
+            tries.add(Intent(Intent.ACTION_VIEW, Uri.parse(id)).setPackage(pkg))
+        }
+        tries.add(ctx.packageManager.getLeanbackLaunchIntentForPackage(pkg) ?: ctx.packageManager.getLaunchIntentForPackage(pkg) ?: return false)
+        for (t in tries) {
+            try { ctx.startActivity(t.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); return true } catch (_: Exception) {}
+        }
+        return false
+    }
+}

@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="home_guard_desc">Makes the Home button open the Aurora launcher. It only watches the Home key and which app is on screen; it reads no content.</string>
+</resources>

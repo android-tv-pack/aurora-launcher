@@ -1,0 +1,18 @@
+# build output and caches
+.gradle/
+.kotlin/
+build/
+app/build/
+app/.cxx/
+local.properties
+*.apk
+*.aab
+*.log
+
+# personal files (settings backups contain your own preferences)
+backups/
+
+# IDE / OS
+.idea/
+*.iml
+.DS_Store
