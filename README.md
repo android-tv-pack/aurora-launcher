@@ -34,6 +34,7 @@ The build targets only `armeabi-v7a` (32-bit); add `arm64-v8a` to `abiFilters` i
 ## Install
 
 1. Download **Aurora.apk** from the [latest release](https://github.com/android-tv-pack/aurora-launcher/releases/latest).
+   Direct link, for the *Downloader* app on the TV: `https://github.com/android-tv-pack/aurora-launcher/releases/latest/download/Aurora.apk`
 2. Put it on the TV and open it: with a file manager app, with the *Downloader* app (enter the release address), or from a USB stick. Android asks once to allow installs from that app.
 3. Open Aurora. Press INFO (or the on-screen "Customize" pill) to change styles, themes, icons, visualizer and screensaver. No MENU key needed.
 
