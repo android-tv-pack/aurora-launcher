@@ -399,7 +399,7 @@ class MainActivity : Activity() {
         val i = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).setComponent(comp)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         AppEntry("$pkg/googletv", pkg, "Google TV", i, ai.loadBanner(packageManager),
-            IconStyles.apply(resources, ai.loadIcon(packageManager), store.iconStyle, accent), true)
+            ai.loadIcon(packageManager), true)
     } catch (e: Exception) { null }
 
     /** cheap fingerprint of every app that has a launcher entry */
@@ -429,7 +429,7 @@ class MainActivity : Activity() {
             val system = (ai.applicationInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
             return AppEntry(
                 "${ai.packageName}/${ai.name}", ai.packageName, ri.loadLabel(pm).toString(),
-                i, banner, IconStyles.apply(resources, ri.loadIcon(pm), store.iconStyle, accent), system
+                i, banner, ri.loadIcon(pm), system
             )
         }
 
@@ -771,8 +771,6 @@ class MainActivity : Activity() {
     private fun applyTheme() {
         bg.setColors(Themes.ALL[store.theme].colors)
         render(null)
-        // Neon and Duotone icons are drawn in the theme colour
-        if (IconStyles.usesAccent(store.iconStyle)) reload(null)
     }
 
     private fun onOff(b: Boolean) = if (b) "On" else "Off"
@@ -824,10 +822,6 @@ class MainActivity : Activity() {
                 Row("Theme", "The glow colours and the colour of highlights", { Themes.ALL[store.theme].name }) { d ->
                     store.theme = (store.theme + d + Themes.ALL.size) % Themes.ALL.size
                     applyTheme()
-                },
-                Row("Icon style", "How the icons of your apps are drawn", { IconStyles.NAMES[store.iconStyle] }) { d ->
-                    store.iconStyle = (store.iconStyle + d + IconStyles.NAMES.size) % IconStyles.NAMES.size
-                    reload(null)
                 },
                 Row("Animated background", "Colours that drift slowly behind the home", { onOff(store.animated) }) {
                     store.animated = !store.animated

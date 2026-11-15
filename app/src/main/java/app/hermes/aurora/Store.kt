@@ -32,11 +32,6 @@ class Store(ctx: Context) {
         get() = p.getBoolean("homeButton", true)
         set(v) { p.edit().putBoolean("homeButton", v).apply() }
 
-    /** 0 Original, 1 Round, 2 Mono, 3 Neon, 4 Duotone, 5 Glass: see IconStyles */
-    var iconStyle: Int
-        get() = p.getInt("iconStyle", 0).coerceIn(0, IconStyles.NAMES.size - 1)
-        set(v) { p.edit().putInt("iconStyle", v).apply() }
-
     /** music visualiser: 0 Off, 1 Flow, 2 Pixels, 3 Wave, 4 Desert, 5 Cyberpunk, 6 Blade Runner (see VisualizerView.MODES) */
     var visualizer: Int
         get() = p.getInt("visualizer", 0).coerceIn(0, 6)

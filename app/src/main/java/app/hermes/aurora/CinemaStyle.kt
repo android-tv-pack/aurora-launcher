@@ -287,9 +287,7 @@ internal class CinemaStyle(a: MainActivity) : HomeStyle(a) {
 
     private fun dockCell(e: AppEntry): View {
         val icon = ImageView(a).apply { setImageDrawable(e.icon) }
-        // Mono / Neon / Glass icons are light or glowing: a white focus plate would swallow them
-        val darkPlate = a.store.iconStyle != 0
-        val name = label(12f, if (darkPlate) Color.WHITE else Color.rgb(6, 18, 26), "sans-serif-medium").apply {
+        val name = label(12f, Color.rgb(6, 18, 26), "sans-serif-medium").apply {
             text = e.label
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
@@ -310,8 +308,7 @@ internal class CinemaStyle(a: MainActivity) : HomeStyle(a) {
         cell.setOnLongClickListener { a.showAppMenu(e); true }
         cell.setOnFocusChangeListener { v, has ->
             if (has) {
-                v.background = if (darkPlate) rounded(Color.argb(205, 14, 18, 30), u(16), u(3), a.accent)
-                else rounded(Color.argb(245, 255, 255, 255), u(16), u(3), a.accent)
+                v.background = rounded(Color.argb(245, 255, 255, 255), u(16), u(3), a.accent)
                 name.visibility = View.VISIBLE
                 v.alpha = 1f
                 current = e

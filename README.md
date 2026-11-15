@@ -11,7 +11,7 @@ It is a personal project, built and tested on a Xiaomi TV Box S (3rd gen, Androi
 - **Extra artwork (optional, off by default):** with your own free TMDB API key, films and series from any app get TMDB's clean backdrop, the title's logo, a line with year, genres and rating, and a short description. Turn it on in Customize > Extra artwork (TMDB). The titles on your home screen are then sent to TMDB to find them. This product uses the TMDB API but is not endorsed or certified by TMDB.
 - **Ad blocker (optional, off by default):** Customize > Ad blocker. Aurora answers the box's address lookups for about 77,000 ad and tracker servers with "no such name" (list: StevenBlack/hosts, MIT). Only lookups pass through it; Android asks once for its VPN permission. Ads served from the same servers as the video itself (YouTube's) are not affected.
 - **Night dimming:** at night (23:00 to 07:00, or hours you choose, or off) the home is dimmed; any key brightens it for a few seconds.
-- Themes and six icon styles (Original, Round, Mono, Neon, Duotone, Glass), all generated on the device. App names are always shown next to the icons.
+- Colour themes. Apps keep their own icons, and their names are always shown next to them.
 - **Now Playing:** any app with a media session (Spotify, YouTube Music, VLC, AirPlay ...) gets a card with cover, progress and Prev / Play-Pause / Next / Stop.
 - **Spotify shelves:** playlists, albums and artists from Spotify's own Android TV home channel, opened by deep link (no account or API key needed inside Aurora).
 - **Music visualizer** that follows the audio output and takes its colours from the playing cover: Flow, Pixels, Wave, and the scenes Desert, Cyberpunk and Blade Runner. Optional auto-rotation per track or on a timer.
@@ -52,7 +52,7 @@ To update, install the new APK over the old one: settings and hidden apps are ke
 
 The standalone AirPlay receiver is not needed any more, Aurora has it built in. Its own APK is on the [upstream releases page](https://github.com/jqssun/android-airplay-server/releases).
 
-**Works right after installing:** the home styles, themes, icon styles, weather, hidden apps, settings backup, the screensaver and the visualizer scenes (Desert, Cyberpunk, Blade Runner), which also animate on their own when nothing plays.
+**Works right after installing:** the home styles, themes, weather, hidden apps, settings backup, the screensaver and the visualizer scenes (Desert, Cyberpunk, Blade Runner), which also animate on their own when nothing plays.
 
 <details>
 <summary><b>Optional extras that need a one-time command from a computer</b></summary>
