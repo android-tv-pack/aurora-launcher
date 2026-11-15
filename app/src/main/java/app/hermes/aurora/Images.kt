@@ -20,15 +20,20 @@ object Images {
         override fun sizeOf(key: String, value: Bitmap) = value.byteCount
     }
 
-    fun cached(url: String): Bitmap? = cache.get(url)
+    /** the same picture is kept once per size it is shown at (a card must not be reused as a full-screen backdrop) */
+    private fun key(url: String, maxWidth: Int) = "$maxWidth|$url"
 
-    /** Calls back on the main thread; bmp is null when the image can't be loaded. */
+    /**
+     * Calls back on the main thread; bmp is null when the image can't be loaded. The picture is decoded
+     * off the main thread and is never wider than [maxWidth] pixels.
+     */
     fun load(ctx: Context, url: String, maxWidth: Int, cb: (Bitmap?) -> Unit) {
-        cache.get(url)?.let { cb(it); return }
+        val k = key(url, maxWidth)
+        cache.get(k)?.let { cb(it); return }
         val app = ctx.applicationContext
         pool.execute {
-            val bmp = try { fetch(app, url, maxWidth) } catch (e: Throwable) { null }
-            if (bmp != null) cache.put(url, bmp)
+            val bmp = cache.get(k) ?: try { fetch(app, url, maxWidth) } catch (e: Throwable) { null }
+            if (bmp != null) cache.put(k, bmp)
             main.post { cb(bmp) }
         }
     }
@@ -40,7 +45,13 @@ object Images {
         var sample = 1
         while (o.outWidth / (sample * 2) >= maxWidth) sample *= 2
         val d = BitmapFactory.Options().apply { inSampleSize = sample }
-        return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, d)
+        val raw = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, d) ?: return null
+        if (raw.width <= maxWidth) return raw
+        // sampling only halves: bring it down to the size it is shown at
+        val h = (raw.height.toLong() * maxWidth / raw.width).toInt().coerceAtLeast(1)
+        val fit = Bitmap.createScaledBitmap(raw, maxWidth, h, true)
+        if (fit !== raw) raw.recycle()
+        return fit
     }
 
     private fun readAll(ctx: Context, url: String): ByteArray? {
