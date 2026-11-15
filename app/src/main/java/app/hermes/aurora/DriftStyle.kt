@@ -37,6 +37,8 @@ internal class DriftStyle(a: MainActivity) : HomeStyle(a) {
     private val hints = ArrayList<View>()
 
     private val shade = View(a)
+    /** the resting screen's own content (clock, date, pill, weather): it leaves while a panel is open, so nothing shows through the panel */
+    private val rest = ArrayList<View>()
     private val sheetHost = FrameLayout(a)
 
     private var apps: List<AppEntry> = emptyList()
@@ -121,6 +123,7 @@ internal class DriftStyle(a: MainActivity) : HomeStyle(a) {
         paintPill()
         center.addView(pill, LinearLayout.LayoutParams(-2, -2).apply { setMargins(0, u(30), 0, 0) })
         root.addView(center, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { setMargins(0, u(104), 0, 0) })
+        rest.add(center)
 
         // weather, in the corner
         wxBox.orientation = LinearLayout.VERTICAL
@@ -130,6 +133,7 @@ internal class DriftStyle(a: MainActivity) : HomeStyle(a) {
         wxBox.addView(wx1, LinearLayout.LayoutParams(-2, -2))
         wxBox.addView(wx2, LinearLayout.LayoutParams(-2, -2).apply { setMargins(0, u(2), 0, 0) })
         root.addView(wxBox, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply { setMargins(0, u(16), u(18), 0) })
+        rest.add(wxBox)
 
         // the four directions
         addHint("▲  APPS", "all your apps, by name", Gravity.TOP or Gravity.CENTER_HORIZONTAL, Gravity.CENTER_HORIZONTAL, false)
@@ -285,6 +289,9 @@ internal class DriftStyle(a: MainActivity) : HomeStyle(a) {
             orientation = LinearLayout.VERTICAL
             background = rounded(Color.argb(240, 10, 12, 22), 0)
             isClickable = true
+            // a focused control grows a little: it must not be cut at the edge of its row
+            clipChildren = false
+            clipToPadding = false
         }
         val lp = when (dir) {
             UP -> FrameLayout.LayoutParams(-1, u(396), Gravity.TOP)
@@ -313,8 +320,10 @@ internal class DriftStyle(a: MainActivity) : HomeStyle(a) {
             }
             box.animate().translationX(0f).translationY(0f).setDuration(240).setInterpolator(DecelerateInterpolator()).start()
             shade.animate().alpha(1f).setDuration(240).start()
+            for (v in rest) v.animate().alpha(0f).setDuration(180).start()
         } else {
             shade.alpha = 1f
+            for (v in rest) { v.animate().cancel(); v.alpha = 0f }
         }
         box.post { if (sheet === box) sheetFocus?.invoke() }
         armIdle()
@@ -348,9 +357,11 @@ internal class DriftStyle(a: MainActivity) : HomeStyle(a) {
             }
             an.withEndAction { sheetHost.removeView(box) }.start()
             shade.animate().alpha(0f).setDuration(200).start()
+            for (v in rest) v.animate().alpha(1f).setDuration(260).start()
         } else {
             sheetHost.removeView(box)
             shade.animate().cancel()
+            for (v in rest) { v.animate().cancel(); v.alpha = 1f }
             shade.alpha = 0f
         }
         showHints()
