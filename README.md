@@ -4,7 +4,7 @@ A fast, ad-free, no-account launcher for Android TV and Google TV boxes, with an
 It is a personal project, built and tested on a Xiaomi TV Box S (3rd gen, Android 14, 32-bit).
 
 - **Two home styles:**
-  - **Marquee**: the title in focus fills the screen with its artwork. A rail of apps with their names on the left, a hero with Resume / Play and Open, then lanes of titles: one lane across every app that publishes any ("Pick up where you left off" when something can be resumed, "From your apps" otherwise) and one lane per app.
+  - **Cinema**: the app in focus drives the whole screen: its newest title fills the backdrop, with Resume / Play and Open, "More from" cards, and a slim dock of apps at the bottom.
   - **Drift**: almost nothing on screen. The scene, a large thin clock, the weather and one pill that resumes the newest title (or opens the last-used app). Up, Left, Down and Right slide a panel in: apps, music, watch, pins. Back, or half a minute without a key press, sends it away again.
 - **Pins:** hold OK on an app or on a title and choose Pin. Pinned apps come first; pinned titles get their own lane, and both wait in Drift's pins panel.
 - **Night dimming:** at night (23:00 to 07:00, or hours you choose, or off) the home is dimmed; any key brightens it for a few seconds.

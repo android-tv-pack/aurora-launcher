@@ -19,7 +19,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 
-/** A complete home-screen layout: Marquee or Drift. */
+/** A complete home-screen layout: Cinema or Drift. */
 internal abstract class HomeStyle(protected val a: MainActivity) {
     abstract val view: View
     abstract fun bind(apps: List<AppEntry>, focusKey: String?)

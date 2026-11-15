@@ -50,7 +50,7 @@ class Store(ctx: Context) {
             if (p.contains("saverMode")) ed.putInt("saverMode", HomeLogic.migrateVisualizer(p.getInt("saverMode", 12)))
             ed.apply()
         }
-        // settings written by a version with the three old styles: Cinema -> Marquee, Horizon and Command -> Drift
+        // settings written by a version with the three old styles: Cinema stays Cinema, Horizon and Command -> Drift
         if (p.getInt("styleV", 0) < 2) {
             val ed = p.edit().putInt("styleV", 2)
             if (p.contains("style")) ed.putInt("style", HomeLogic.migrateStyle(p.getInt("style", 1)))
@@ -58,10 +58,10 @@ class Store(ctx: Context) {
         }
     }
 
-    /** 1 = Marquee, 2 = Drift (see HomeLogic) */
+    /** 1 = Cinema, 2 = Drift (see HomeLogic) */
     var style: Int
-        get() = p.getInt("style", HomeLogic.MARQUEE).coerceIn(HomeLogic.MARQUEE, HomeLogic.DRIFT)
-        set(v) { p.edit().putInt("style", v.coerceIn(HomeLogic.MARQUEE, HomeLogic.DRIFT)).apply() }
+        get() = p.getInt("style", HomeLogic.CINEMA).coerceIn(HomeLogic.CINEMA, HomeLogic.DRIFT)
+        set(v) { p.edit().putInt("style", v.coerceIn(HomeLogic.CINEMA, HomeLogic.DRIFT)).apply() }
 
     /** night dimming: 0 Off, 1 Auto (23:00 to 07:00), 2 the hours below */
     var nightMode: Int

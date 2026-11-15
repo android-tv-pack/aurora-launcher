@@ -48,7 +48,7 @@ import kotlin.math.roundToInt
  * Aurora: a modern, dark, free TV launcher. No accounts, no premium tier, no ads.
  * Network is used only for the weather (Open-Meteo, no key) and the artwork apps publish.
  *
- *  - two home styles, Marquee and Drift (see MarqueeStyle, DriftStyle), over an animated scene or the theme's colours
+ *  - two home styles, Cinema and Drift (see CinemaStyle, DriftStyle), over an animated scene or the theme's colours
  *  - hold OK on an app: pin / reorder / hide / app info / uninstall; hold OK on a title: pin
  *  - MENU or INFO key (or the on-screen "Customize"): style, theme, icons, visualizer, night dimming, weather ...
  */
@@ -65,7 +65,7 @@ class MainActivity : Activity() {
     internal val handler = Handler(Looper.getMainLooper())
     internal var feed: Map<String, List<TvFeed.Item>> = emptyMap()
 
-    // ---- the home style on screen (Marquee or Drift)
+    // ---- the home style on screen (Cinema or Drift)
     private lateinit var host: FrameLayout
     internal lateinit var viz: VisualizerView
     private var currentStyle: HomeStyle? = null
@@ -459,6 +459,21 @@ class MainActivity : Activity() {
     internal fun wxNow(): String =
         if (wxReady()) "${tf(store.wTemp)}  ${Weather.label(store.wCode).lowercase(Locale.getDefault())}" else ""
     internal fun wxPlace(): String = if (wxReady()) store.place else ""
+    /** Cinema header: "☀  15°   Clear" */
+    internal fun wxMain(): String = when {
+        !store.showWeather -> ""
+        !wxReady() -> weatherError ?: "Loading weather…"
+        else -> "${Weather.emoji(store.wCode, store.wDay)}  ${tf(store.wTemp)}   ${Weather.label(store.wCode)}"
+    }
+    /** Cinema header: "Lisbon    H 18°   L 9°" */
+    internal fun wxSub(): String =
+        if (wxReady()) "${store.place}    H ${tf(store.wHi)}   L ${tf(store.wLo)}" else ""
+
+    /** Cinema's on-screen way into Customize for remotes that have no MENU key. */
+    internal fun customizeButton(): TextView = pill("\u2699  Customize") { if (panel == null) openSettings() else closeSettings() }.apply {
+        // nothing is above it: swallow UP so focus can't fall off the screen
+        setOnKeyListener { _, k, e -> k == KeyEvent.KEYCODE_DPAD_UP && e.action == KeyEvent.ACTION_DOWN }
+    }
 
     private fun updateWeather() {
         currentStyle?.onWeather()
@@ -606,7 +621,7 @@ class MainActivity : Activity() {
         for (e in ordered) byPkg.putIfAbsent(e.pkg, e)
         appByPkg = byPkg
         applyChrome()
-        val st: HomeStyle = if (store.style == HomeLogic.DRIFT) DriftStyle(this) else MarqueeStyle(this)
+        val st: HomeStyle = if (store.style == HomeLogic.DRIFT) DriftStyle(this) else CinemaStyle(this)
         currentStyle = st
         host.addView(st.view, ViewGroup.LayoutParams(-1, -1))
         st.bind(ordered, key)
@@ -755,7 +770,7 @@ class MainActivity : Activity() {
         val rotNames = arrayOf("Off", "Every track", "Every 5 min", "Every 15 min")
         val rows = listOf(
             Row("Home style", { HomeLogic.STYLE_NAMES[store.style - 1] }) {
-                store.style = if (store.style == HomeLogic.MARQUEE) HomeLogic.DRIFT else HomeLogic.MARQUEE
+                store.style = if (store.style == HomeLogic.CINEMA) HomeLogic.DRIFT else HomeLogic.CINEMA
                 render(null)
             },
             Row("Theme", { Themes.ALL[store.theme].name }) { d ->
@@ -906,7 +921,7 @@ class MainActivity : Activity() {
             if (first == null) first = line
         }
         col.addView(TextView(this).apply {
-            text = "Aurora 3.17  ·  free, no ads, no account"
+            text = "Aurora 3.18  ·  free, no ads, no account"
             setTextSize(TypedValue.COMPLEX_UNIT_PX, u(10).toFloat())
             setTextColor(Color.argb(110, 255, 255, 255))
             setPadding(u(6), u(10), 0, 0)

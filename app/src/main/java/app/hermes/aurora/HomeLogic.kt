@@ -9,12 +9,12 @@ internal object HomeLogic {
 
     // ---------------------------------------------------------------- styles
 
-    const val MARQUEE = 1
+    const val CINEMA = 1
     const val DRIFT = 2
-    val STYLE_NAMES = arrayOf("Marquee", "Drift")
+    val STYLE_NAMES = arrayOf("Cinema", "Drift")
 
     /** A style stored by an older version (0 Classic, 1 Cinema, 2 Horizon, 3 Command) as one of today's two. */
-    fun migrateStyle(old: Int): Int = if (old <= 1) MARQUEE else DRIFT
+    fun migrateStyle(old: Int): Int = if (old <= 1) CINEMA else DRIFT
 
     /**
      * A visualizer number stored before six of them were removed (0 Off, 1 Flow, 2 Orb, 3 Stardust, 4 Silk, 5 Pixels,

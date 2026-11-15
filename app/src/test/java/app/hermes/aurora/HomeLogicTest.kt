@@ -14,9 +14,9 @@ class HomeLogicTest {
 
     // ---- style migration
 
-    @Test fun cinemaBecomesMarquee() {
-        assertEquals(HomeLogic.MARQUEE, HomeLogic.migrateStyle(1))
-        assertEquals(HomeLogic.MARQUEE, HomeLogic.migrateStyle(0))     // the long-gone Classic screen
+    @Test fun cinemaStaysCinema() {
+        assertEquals(HomeLogic.CINEMA, HomeLogic.migrateStyle(1))
+        assertEquals(HomeLogic.CINEMA, HomeLogic.migrateStyle(0))     // the long-gone Classic screen
     }
 
     @Test fun horizonAndCommandBecomeDrift() {
@@ -25,7 +25,7 @@ class HomeLogicTest {
     }
 
     @Test fun styleNamesMatchTheIds() {
-        assertEquals("Marquee", HomeLogic.STYLE_NAMES[HomeLogic.MARQUEE - 1])
+        assertEquals("Cinema", HomeLogic.STYLE_NAMES[HomeLogic.CINEMA - 1])
         assertEquals("Drift", HomeLogic.STYLE_NAMES[HomeLogic.DRIFT - 1])
     }
 
