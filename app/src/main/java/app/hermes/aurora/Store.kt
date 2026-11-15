@@ -121,6 +121,14 @@ class Store(ctx: Context) {
         get() = p.getString("musicApp", "") ?: ""
         set(v) { p.edit().putString("musicApp", v).apply() }
 
+    /** when Aurora last looked for an update of itself, and the release it found then ("" = none) */
+    var updateChecked: Long
+        get() = p.getLong("updateChecked", 0L)
+        set(v) { p.edit().putLong("updateChecked", v).apply() }
+    var updateSeen: String
+        get() = p.getString("updateSeen", "") ?: ""
+        set(v) { p.edit().putString("updateSeen", v).apply() }
+
     /** the tab Customize was left on */
     var settingsTab: Int
         get() = p.getInt("settingsTab", 0)
@@ -146,7 +154,7 @@ class Store(ctx: Context) {
         set(v) { p.edit().putInt("saverMode", v).apply() }
 
     // ---- backup / restore of the settings (not the weather cache)
-    private val skip = setOf("lat", "lon", "geoFor", "place", "wTemp", "wHi", "wLo", "wCode", "wDay", "wTime", "recents", "askedTv", "adblock", "tmdbKey", "iptvRecent", "previewsAsked")
+    private val skip = setOf("lat", "lon", "geoFor", "place", "wTemp", "wHi", "wLo", "wCode", "wDay", "wTime", "recents", "askedTv", "adblock", "tmdbKey", "iptvRecent", "previewsAsked", "updateChecked", "updateSeen")
     private var backupListener: android.content.SharedPreferences.OnSharedPreferenceChangeListener? = null
 
     fun exportJson(): String {

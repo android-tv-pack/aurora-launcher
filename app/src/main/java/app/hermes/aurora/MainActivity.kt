@@ -957,11 +957,58 @@ class MainActivity : Activity() {
                 Row("Pause music when another app opens", "Music does not play on under a film", { onOff(store.pauseOnSwitch) }) {
                     store.pauseOnSwitch = !store.pauseOnSwitch
                 },
+                Row("Aurora update", "A newer Aurora, from its public releases", { Update.label() }, steps = false) { askUpdate() },
+                Row("App updates", "Opens the list of updates in your app store", { appStore()?.second ?: "" }, { appStore() != null }, steps = false) { openStoreUpdates() },
                 Row("Apps", "Open, update or remove the apps on this device", { num(manageable().size) }, steps = false) { askApps() },
                 Row("Clear cache", "Free the space taken by temporary files", { HomeLogic.size(ownCache()) }, steps = false) { askCache() },
                 Row("Settings backup", "Save these settings, or bring saved ones back", { backupLabel() }, steps = false) { askBackup() }
             ))
         )
+    }
+
+    /** Aurora's own update: look for one, or offer the one that was found */
+    private fun askUpdate() {
+        val r = Update.available
+        if (r == null || Update.progress >= 0) {
+            if (Update.progress < 0) Update.check(store, true) { refreshPanel?.invoke() }
+            refreshPanel?.invoke()
+            return
+        }
+        if (!Update.allowed(this)) {
+            sheet("Allow Aurora to install its update", "Android asks for this once: on the next screen, allow Aurora to install apps. " +
+                "It is used only for Aurora's own updates, and Android still asks you before each one.")
+                .button("Cancel")
+                .button("Open the setting", primary = true) {
+                    launch(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+                }.open()
+            return
+        }
+        sheet("Aurora ${r.name}", "You have ${BuildConfig.VERSION_NAME.replace("-", " ")}. The new build is downloaded from Aurora's releases on GitHub, " +
+            "then Android asks you to confirm the update. Your settings stay as they are.")
+            .button("Not now")
+            .button("Download and install", primary = true) { Update.install(this, r) { refreshPanel?.invoke() }; refreshPanel?.invoke() }
+            .open()
+    }
+
+    private var storeCache: Pair<String, String>? = null
+    private var storeFor = ""
+
+    /** the app store most of the apps came from, as (package, name), or null when none did */
+    private fun appStore(): Pair<String, String>? {
+        if (storeFor == appsSig && appsSig.isNotEmpty()) return storeCache
+        storeFor = appsSig
+        storeCache = manageable().mapNotNull { storeOf(it.pkg) }.groupingBy { it }.eachCount().maxByOrNull { it.value }?.key
+        return storeCache
+    }
+
+    /** the store's own list of updates where it has such a screen, else the store */
+    private fun openStoreUpdates() {
+        val (pkg, _) = appStore() ?: return
+        val pm = packageManager
+        val known = listOf(Intent("com.google.android.finsky.VIEW_MY_DOWNLOADS"), Intent(Intent.ACTION_VIEW, Uri.parse("market://my-apps")))
+            .map { it.setPackage(pkg) }.firstOrNull { pm.resolveActivity(it, 0) != null }
+        val i = known ?: pm.getLeanbackLaunchIntentForPackage(pkg) ?: pm.getLaunchIntentForPackage(pkg)
+        if (i == null) Toast.makeText(this, "Can't open the store", Toast.LENGTH_SHORT).show() else launch(i)
     }
 
     /** "Wi-Fi  ·  192.168.1.20", "Ethernet", "Not connected" */
@@ -1238,6 +1285,8 @@ class MainActivity : Activity() {
         host.descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
         show(cur)
         focusPanel?.invoke()
+        Update.onChange = { refreshPanel?.invoke() }
+        Update.check(store, false) { refreshPanel?.invoke() }
         // figures change in the background (lookups blocked, the guide being read)
         handler.postDelayed(panelTick, 2000)
     }

@@ -188,6 +188,9 @@ internal class LaneList(private val a: MainActivity, cardU: Float, sideU: Float,
         view.overScrollMode = View.OVER_SCROLL_NEVER
         view.isFocusable = false
         view.descendantFocusability = ViewGroup.FOCUS_AFTER_DESCENDANTS
+        // lanes that have scrolled away must not show above the list (its parent lets children draw outside themselves)
+        view.outlineProvider = android.view.ViewOutlineProvider.BOUNDS
+        view.clipToOutline = true
         col.orientation = LinearLayout.VERTICAL
         view.addView(col, ViewGroup.LayoutParams(-1, -2))
     }
