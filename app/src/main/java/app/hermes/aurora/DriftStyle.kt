@@ -25,7 +25,7 @@ internal class DriftStyle(a: MainActivity) : HomeStyle(a) {
     private val root = FrameLayout(a)
     override val view: View get() = root
 
-    private val clock = label(128f, Color.WHITE, "sans-serif-thin", -0.03f)
+    private val clock = label(128f, Color.WHITE, "sans-serif-thin").apply { maxLines = 1 }
     private val date = label(13f, Color.argb(240, 255, 255, 255), "sans-serif", 0.34f)
     private val wx1 = label(15f, Color.WHITE, "sans-serif")
     private val wx2 = label(11.5f, Color.argb(215, 255, 255, 255), "sans-serif")
@@ -85,7 +85,8 @@ internal class DriftStyle(a: MainActivity) : HomeStyle(a) {
         clock.setShadowLayer(u(12).toFloat(), 0f, u(2).toFloat(), shadow)
         date.setShadowLayer(u(6).toFloat(), 0f, u(1).toFloat(), shadow)
         val center = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL; clipChildren = false }
-        center.addView(clock)
+        // (explicit sizes: a vertical LinearLayout would otherwise squeeze a child to the width of its siblings)
+        center.addView(clock, LinearLayout.LayoutParams(-2, -2))
         center.addView(date, LinearLayout.LayoutParams(-2, -2).apply { setMargins(0, u(10), 0, 0) })
 
         // the one pill
@@ -102,7 +103,7 @@ internal class DriftStyle(a: MainActivity) : HomeStyle(a) {
         val txt = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL }
         pillTitle.maxWidth = u(460)
         pillSub.maxLines = 1
-        txt.addView(pillTitle)
+        txt.addView(pillTitle, LinearLayout.LayoutParams(-2, -2))
         txt.addView(pillSub, LinearLayout.LayoutParams(-2, -2).apply { setMargins(0, u(1), 0, 0) })
         pill.addView(txt, LinearLayout.LayoutParams(-2, -2).apply { setMargins(u(12), 0, 0, 0) })
         pill.setOnFocusChangeListener { _, _ -> paintPill() }
@@ -126,7 +127,7 @@ internal class DriftStyle(a: MainActivity) : HomeStyle(a) {
         wxBox.gravity = Gravity.END
         wxBox.background = rounded(Color.argb(115, 0, 0, 0), u(12))
         wxBox.setPadding(u(12), u(8), u(12), u(8))
-        wxBox.addView(wx1)
+        wxBox.addView(wx1, LinearLayout.LayoutParams(-2, -2))
         wxBox.addView(wx2, LinearLayout.LayoutParams(-2, -2).apply { setMargins(0, u(2), 0, 0) })
         root.addView(wxBox, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply { setMargins(0, u(16), u(18), 0) })
 
@@ -155,7 +156,7 @@ internal class DriftStyle(a: MainActivity) : HomeStyle(a) {
         val h = label(10f, Color.WHITE, "sans-serif-medium", 0.3f).apply { text = head }
         val c = label(10f, Color.argb(205, 255, 255, 255)).apply { text = caption }
         val gap = LinearLayout.LayoutParams(-2, -2).apply { setMargins(0, u(3), 0, 0) }
-        if (captionFirst) { box.addView(c); box.addView(h, gap) } else { box.addView(h); box.addView(c, gap) }
+        if (captionFirst) { box.addView(c, LinearLayout.LayoutParams(-2, -2)); box.addView(h, gap) } else { box.addView(h, LinearLayout.LayoutParams(-2, -2)); box.addView(c, gap) }
         root.addView(box, FrameLayout.LayoutParams(-2, -2, where).apply { setMargins(u(14), u(12), u(14), u(12)) })
         hints.add(box)
     }
@@ -286,7 +287,7 @@ internal class DriftStyle(a: MainActivity) : HomeStyle(a) {
             isClickable = true
         }
         val lp = when (dir) {
-            UP -> FrameLayout.LayoutParams(-1, u(330), Gravity.TOP)
+            UP -> FrameLayout.LayoutParams(-1, u(396), Gravity.TOP)
             DOWN -> FrameLayout.LayoutParams(-1, u(420), Gravity.BOTTOM)
             LEFT -> FrameLayout.LayoutParams(u(SIDE), -1, Gravity.START)
             else -> FrameLayout.LayoutParams(u(SIDE), -1, Gravity.END)
@@ -358,7 +359,7 @@ internal class DriftStyle(a: MainActivity) : HomeStyle(a) {
     private fun header(box: LinearLayout, title: String, caption: String, extra: View? = null) {
         val row = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; clipChildren = false }
         val col = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL }
-        col.addView(label(11f, a.accent, "sans-serif-medium", 0.3f).apply { text = title })
+        col.addView(label(11f, a.accent, "sans-serif-medium", 0.3f).apply { text = title }, LinearLayout.LayoutParams(-2, -2))
         col.addView(label(10.5f, Color.argb(190, 255, 255, 255)).apply { text = caption; includeFontPadding = true },
             LinearLayout.LayoutParams(-2, -2).apply { setMargins(0, u(2), 0, 0) })
         row.addView(col, LinearLayout.LayoutParams(0, -2, 1f))

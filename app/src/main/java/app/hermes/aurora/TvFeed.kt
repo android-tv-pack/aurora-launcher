@@ -73,7 +73,12 @@ object TvFeed {
                         val pr = if (iPosterR >= 0 && !c.isNull(iPosterR)) c.getInt(iPosterR) else 4
                         val tr = if (iThumbR >= 0 && !c.isNull(iThumbR)) c.getInt(iThumbR) else 0
                         // prefer a landscape picture: it can fill the screen
-                        val squareArt = (!poster.isNullOrEmpty() && pr == 3) || (poster.isNullOrEmpty() && !thumb.isNullOrEmpty() && tr == 3)
+                        val intentUri = if (iIntent >= 0) c.getString(iIntent) else null
+                        // music apps say what the item is in their deep link: .../playlist/ID, /album/ID, /artist/ID
+                        val musicKind = intentUri?.let { Regex("/(playlist|album|artist|track|show|episode)/").find(it)?.groupValues?.get(1)?.uppercase() }
+                        // covers are square, also when the app does not state the shape of its picture
+                        val cover = musicKind == "PLAYLIST" || musicKind == "ALBUM" || musicKind == "ARTIST" || musicKind == "TRACK"
+                        val squareArt = (!poster.isNullOrEmpty() && (pr == 3 || cover)) || (poster.isNullOrEmpty() && !thumb.isNullOrEmpty() && (tr == 3 || cover))
                         val (art, land) = when {
                             squareArt && !poster.isNullOrEmpty() -> poster to false
                             squareArt -> thumb!! to false
@@ -83,12 +88,9 @@ object TvFeed {
                             !thumb.isNullOrEmpty() -> thumb to landscape(tr)
                             else -> continue
                         }
-                        val intentUri = if (iIntent >= 0) c.getString(iIntent) else null
                         val pos = if (iPos >= 0 && !c.isNull(iPos)) c.getLong(iPos) else 0L
                         val dur = if (iDur >= 0 && !c.isNull(iDur)) c.getLong(iDur) else 0L
                         val progress = if (pos > 0 && dur > 0) (pos.toFloat() / dur).coerceIn(0f, 1f) else -1f
-                        // music apps say what the item is in their deep link: .../playlist/ID, /album/ID, /artist/ID
-                        val musicKind = intentUri?.let { Regex("/(playlist|album|artist|track|show|episode)/").find(it)?.groupValues?.get(1)?.uppercase() }
                         out.getOrPut(pkg) { ArrayList() }
                             .add(Item(pkg, title, desc, art, land, squareArt, musicKind ?: kindOf(c), intentUri, progress,
                                 if (iEng >= 0 && !c.isNull(iEng)) c.getLong(iEng) else 0L, watchNext,

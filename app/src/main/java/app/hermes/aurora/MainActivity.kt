@@ -844,7 +844,7 @@ class MainActivity : Activity() {
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = rounded(Color.argb(238, 10, 14, 28), u(18), u(1), Color.argb(60, 255, 255, 255))
-            setPadding(u(20), u(18), u(20), u(14))
+            setPadding(u(20), u(14), u(20), u(10))
         }
         col.addView(TextView(this).apply {
             text = "CUSTOMIZE"
@@ -873,7 +873,7 @@ class MainActivity : Activity() {
                 gravity = Gravity.CENTER_VERTICAL
                 isFocusable = true
                 isClickable = true
-                setPadding(u(12), u(2.6f), u(12), u(2.6f))
+                setPadding(u(12), u(1.8f), u(12), u(1.8f))
             }
             line.addView(TextView(this).apply {
                 text = r.title

@@ -45,7 +45,6 @@ internal class MarqueeStyle(a: MainActivity) : HomeStyle(a), LaneList.Host {
     private val kicker = label(10.5f, a.accent, "sans-serif-medium", 0.28f)
     private val title = titleLabel(46f, 2, Color.WHITE, "sans-serif").apply {
         typeface = android.graphics.Typeface.create("sans-serif", android.graphics.Typeface.BOLD)
-        letterSpacing = -0.02f
         setLineSpacing(0f, 0.95f)
     }
     private val desc = label(13f, Color.argb(225, 255, 255, 255)).apply {
@@ -96,12 +95,10 @@ internal class MarqueeStyle(a: MainActivity) : HomeStyle(a), LaneList.Host {
 
         // the dark fade every text sits on: strong on the left (hero) and at the bottom (lanes), a band at the top (clock)
         val left = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
-            intArrayOf(Color.argb(238, 0, 0, 0), Color.argb(160, 0, 0, 0), Color.argb(20, 0, 0, 0)))
+            intArrayOf(Color.argb(240, 0, 0, 0), Color.argb(190, 0, 0, 0), Color.argb(70, 0, 0, 0), Color.argb(0, 0, 0, 0)))
         val bottom = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP,
-            intArrayOf(Color.argb(248, 0, 0, 0), Color.argb(190, 0, 0, 0), Color.argb(0, 0, 0, 0)))
-        val top = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-            intArrayOf(Color.argb(170, 0, 0, 0), Color.argb(0, 0, 0, 0), Color.argb(0, 0, 0, 0), Color.argb(0, 0, 0, 0)))
-        scrim.background = LayerDrawable(arrayOf(left, bottom, top))
+            intArrayOf(Color.argb(250, 0, 0, 0), Color.argb(215, 0, 0, 0), Color.argb(60, 0, 0, 0), Color.argb(0, 0, 0, 0)))
+        scrim.background = LayerDrawable(arrayOf(left, bottom))
         root.addView(scrim, matchParent())
 
         cover.scaleType = ImageView.ScaleType.CENTER_CROP
@@ -137,10 +134,16 @@ internal class MarqueeStyle(a: MainActivity) : HomeStyle(a), LaneList.Host {
         })
 
         // clock, date and weather, top right
-        val head = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.END }
-        head.addView(clock)
+        val head = LinearLayout(a).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.END
+            // its own dark plate: the corner of a picture can be anything, also white
+            background = rounded(Color.argb(120, 0, 0, 0), u(12))
+            setPadding(u(12), u(7), u(12), u(8))
+        }
+        head.addView(clock, LinearLayout.LayoutParams(-2, -2))
         head.addView(sub, LinearLayout.LayoutParams(-2, -2).apply { setMargins(0, u(3), 0, 0) })
-        root.addView(head, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply { setMargins(0, u(22), u(34), 0) })
+        root.addView(head, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply { setMargins(0, u(16), u(22), 0) })
 
         // the rail of apps
         rail.background = LayerDrawable(arrayOf(
@@ -225,9 +228,16 @@ internal class MarqueeStyle(a: MainActivity) : HomeStyle(a), LaneList.Host {
     }
 
     private fun paintRail() {
+        val inRail = railRows.any { it.isFocused } || customize.isFocused
+        var first = true
         for (r in railRows + customize) {
             val key = r.tag as? String
             val marked = heroPkg != null && apps.firstOrNull { it.key == key }?.pkg == heroPkg
+            if (marked && first && !inRail) {
+                // the app of the title on screen stays in view while the focus is elsewhere
+                first = false
+                r.post { railScroll.smoothScrollTo(0, (r.top + r.height / 2 - railScroll.height / 2).coerceAtLeast(0)) }
+            }
             r.background = when {
                 r.isFocused -> rounded(Color.argb(90, 255, 255, 255), u(10), u(3), a.accent)
                 marked -> rounded(Color.argb(40, 255, 255, 255), u(10), maxOf(1, u(1)), Color.argb(70, 255, 255, 255))
@@ -407,7 +417,7 @@ internal class MarqueeStyle(a: MainActivity) : HomeStyle(a), LaneList.Host {
         shown = item
         heroPkg = item.pkg
         transport(false)
-        if (!item.square) { cover.visibility = View.GONE; lastAmbient = null }
+        if (!same) cover.visibility = View.GONE
         val app = e?.label ?: ""
         val kind = if (item.resume) "CONTINUE" else item.kind
         val left = HomeLogic.leftText(item.leftMs)
@@ -434,9 +444,10 @@ internal class MarqueeStyle(a: MainActivity) : HomeStyle(a), LaneList.Host {
     }
 
     private fun loadArtFor(item: TvFeed.Item) {
-        Images.load(a, item.art, if (item.square) 480 else a.resources.displayMetrics.widthPixels.coerceAtMost(1920)) { bmp ->
+        Images.load(a, item.art, if (item.square) 480 else BACKDROP_PX) { bmp ->
             if (destroyed || shown !== item || bmp == null) return@load
-            if (item.square) {
+            // judged by the picture itself as well: apps do not always say that a cover is square
+            if (item.square || kotlin.math.abs(bmp.width - bmp.height) < bmp.width * 0.12f) {
                 // a playlist / album cover: a cover card, and its colours as a soft wash (unless a visualizer is the backdrop)
                 cover.setImageBitmap(bmp)
                 cover.visibility = View.VISIBLE
@@ -540,5 +551,7 @@ internal class MarqueeStyle(a: MainActivity) : HomeStyle(a), LaneList.Host {
     private companion object {
         /** width of the rail of apps, in screen units */
         const val RAIL = 150
+        /** a full-screen picture is decoded no wider than this (about 3.7 MB each), which is what apps publish anyway */
+        const val BACKDROP_PX = 1280
     }
 }
