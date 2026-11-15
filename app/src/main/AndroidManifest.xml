@@ -27,6 +27,10 @@
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <queries>
+        <!-- apps that publish default previews when the home screen asks them to -->
+        <intent>
+            <action android:name="android.media.tv.action.INITIALIZE_PROGRAMS" />
+        </intent>
         <package android:name="com.google.android.apps.tv.launcherx" />
         <intent>
             <action android:name="android.intent.action.MAIN" />

@@ -103,6 +103,18 @@ internal object HomeLogic {
         if (covers.isEmpty() || name == null) null else Lane(name, covers.take(perLane), false)
     }
 
+    // ---------------------------------------------------------------- default previews of newly installed apps
+
+    /**
+     * Android TV expects the home screen to tell an app once, after it is installed, to publish its default
+     * previews. [able] are the installed apps that listen for that, [asked] those already told:
+     * the apps to tell now, and the new list of told apps (an app that was removed is told again when it returns).
+     */
+    fun previewsToAsk(able: List<String>, asked: List<String>): Pair<List<String>, List<String>> {
+        val now = able.distinct()
+        return now.filter { it !in asked } to now
+    }
+
     // ---------------------------------------------------------------- the centre of Drift
 
     /** The app that was opened last among the apps on the home ([keys], in the home's order); the first app when none was. */

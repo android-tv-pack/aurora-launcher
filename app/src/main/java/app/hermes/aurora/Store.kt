@@ -116,6 +116,11 @@ class Store(ctx: Context) {
     /** an earlier version kept a playlist link (with the subscription key in it): it is not needed any more */
     fun dropPlaylist() { p.edit().remove("iptvUrl").remove("iptvExtra").remove("iptvGroup").apply() }
 
+    /** the apps that were already asked to publish their default previews (see MainActivity.askForPreviews) */
+    var previewsAsked: List<String>
+        get() = list("previewsAsked")
+        set(v) { putList("previewsAsked", v.distinct()) }
+
     var pauseOnSwitch: Boolean
         get() = p.getBoolean("pauseOnSwitch", true)
         set(v) { p.edit().putBoolean("pauseOnSwitch", v).apply() }
@@ -136,7 +141,7 @@ class Store(ctx: Context) {
         set(v) { p.edit().putInt("saverMode", v).apply() }
 
     // ---- backup / restore of the settings (not the weather cache)
-    private val skip = setOf("lat", "lon", "geoFor", "place", "wTemp", "wHi", "wLo", "wCode", "wDay", "wTime", "recents", "askedTv", "adblock", "tmdbKey", "iptvRecent")
+    private val skip = setOf("lat", "lon", "geoFor", "place", "wTemp", "wHi", "wLo", "wCode", "wDay", "wTime", "recents", "askedTv", "adblock", "tmdbKey", "iptvRecent", "previewsAsked")
     private var backupListener: android.content.SharedPreferences.OnSharedPreferenceChangeListener? = null
 
     fun exportJson(): String {

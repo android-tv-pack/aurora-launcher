@@ -379,6 +379,7 @@ class MainActivity : Activity() {
                 dirty = false
                 apps = list
                 render(focusId)
+                askForPreviews()
             }
         }.start()
     }
@@ -1119,6 +1120,31 @@ class MainActivity : Activity() {
                 currentStyle?.onFeed()
             }
         }.start()
+    }
+
+    /**
+     * Android TV apps publish their default previews when the home screen tells them to, once after they are
+     * installed (the system's own launcher does this; as the home screen, Aurora has to as well, or a new app
+     * shows nothing until it decides to publish by itself). Every installed app that listens is told once.
+     */
+    private fun askForPreviews() {
+        try {
+            val action = "android.media.tv.action.INITIALIZE_PROGRAMS"
+            val found = packageManager.queryBroadcastReceivers(Intent(action), 0).mapNotNull { it.activityInfo }
+                .filter { it.packageName != packageName }
+            val (ask, told) = HomeLogic.previewsToAsk(found.map { it.packageName }, store.previewsAsked)
+            for (r in found) if (r.packageName in ask) {
+                sendBroadcast(Intent(action).setClassName(r.packageName, r.name).addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES))
+            }
+            if (told != store.previewsAsked) store.previewsAsked = told
+            if (ask.isNotEmpty()) {
+                android.util.Log.i("AuroraFeed", "asked for default previews: " + ask.joinToString())
+                // publishing takes the app a moment
+                for (t in longArrayOf(15_000, 60_000)) handler.postDelayed({ if (!isDestroyed) loadFeed() }, t)
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("AuroraFeed", "asking for previews failed: $e")
+        }
     }
 
     /** the app TV channels open in: the one chosen in Customize, else the first that looks like an IPTV player */

@@ -115,6 +115,16 @@ class HomeLogicTest {
         assertEquals("", HomeLogic.leftText(0))
     }
 
+    // ---- default previews
+
+    @Test fun everyAppIsToldOnceToPublishItsPreviews() {
+        val (ask, told) = HomeLogic.previewsToAsk(listOf("num", "flux", "num"), listOf("flux", "gone"))
+        assertEquals(listOf("num"), ask)
+        assertEquals(listOf("num", "flux"), told)                 // an app that was removed is forgotten ...
+        assertEquals(listOf("gone"), HomeLogic.previewsToAsk(listOf("num", "flux", "gone"), told).first)   // ... and told again when it returns
+        assertTrue(HomeLogic.previewsToAsk(listOf("num", "flux"), told).first.isEmpty())
+    }
+
     // ---- the centre of Drift
 
     @Test fun theAppOpenedLastIsTheDefault() {
