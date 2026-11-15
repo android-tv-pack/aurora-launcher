@@ -54,7 +54,12 @@ import kotlin.math.roundToInt
  */
 class MainActivity : Activity() {
 
-    private class Row(val title: String, val value: () -> String, val shown: () -> Boolean = { true }, val act: (Int) -> Unit)
+    /** a setting of Customize; [steps] = Left and Right step through its values (otherwise OK acts) */
+    private class Row(val title: String, val desc: String, val value: () -> String, val shown: () -> Boolean = { true },
+                      val steps: Boolean = true, val act: (Int) -> Unit)
+    /** a tab of Customize: its settings on the left; on the right what it is for, figures, and for Look a live picture */
+    private class Tab(val name: String, val blurb: String, val preview: Boolean = false,
+                      val stats: () -> List<Pair<String, String>> = { emptyList() }, val rows: List<Row>)
 
     internal lateinit var store: Store
     private lateinit var rootView: FrameLayout
@@ -779,206 +784,332 @@ class MainActivity : Activity() {
         if (want != HomeGuardService.isEnabled(this)) HomeGuardService.setEnabled(this, want)
     }
 
-    internal fun openSettings() {
-        if (panel != null) return
-        val sizes = arrayOf("Small", "Medium", "Large")
+    private fun settingsTabs(): List<Tab> {
         val nightNames = arrayOf("Off", "Auto (23:00 to 07:00)", "Custom hours")
         fun hour(h: Int) = String.format(Locale.US, "%02d:00", h)
+        fun num(n: Int) = String.format(Locale.US, "%,d", n)
         val saverNames = arrayOf("Off", "2 min", "5 min", "10 min", "20 min")
         val saverScenes = intArrayOf(6, 5, 4, -1)             // Blade Runner, Cyberpunk, Desert, Rotate
         val rotNames = arrayOf("Off", "Every track", "Every 5 min", "Every 15 min")
-        val rows = listOf(
-            Row("Home style", { HomeLogic.STYLE_NAMES[store.style - 1] }) {
-                store.style = if (store.style == HomeLogic.CINEMA) HomeLogic.DRIFT else HomeLogic.CINEMA
-                render(null)
-            },
-            Row("Theme", { Themes.ALL[store.theme].name }) { d ->
-                store.theme = (store.theme + d + Themes.ALL.size) % Themes.ALL.size
-                applyTheme()
-            },
-            Row("Icon style", { IconStyles.NAMES[store.iconStyle] }) { d ->
-                store.iconStyle = (store.iconStyle + d + IconStyles.NAMES.size) % IconStyles.NAMES.size
-                reload(null)
-            },
-            Row("Music visualizer", { vizLabel() }) { d ->
-                store.visualizer = (store.visualizer + d + VisualizerView.MODES.size) % VisualizerView.MODES.size
-                viz.evaluate()
-                onVisualizerChanged()
-            },
-            Row("Visualizer rotation", { rotNames[store.vizRotate] }) { d ->
-                store.vizRotate = (store.vizRotate + d + 4) % 4
-                viz.evaluate()
-            },
-            Row("Screensaver", { saverNames[store.saver] }) { d ->
-                store.saver = (store.saver + d + 5) % 5
-                lastInteraction = android.os.SystemClock.elapsedRealtime()
-            },
-            Row("Screensaver scene", { if (store.saverMode == -1) "Rotate" else VisualizerView.MODES[store.saverMode] }) { d ->
-                val i = saverScenes.indexOf(store.saverMode).coerceAtLeast(0)
-                store.saverMode = saverScenes[(i + d + saverScenes.size) % saverScenes.size]
-            },
-            Row("Night dimming", { nightNames[store.nightMode] }) { d ->
-                store.nightMode = (store.nightMode + d + 3) % 3
-                updateNight(true)
-            },
-            Row("Dim from", { hour(store.nightFrom) }, { store.nightMode == HomeLogic.NIGHT_CUSTOM }) { d ->
-                store.nightFrom = (store.nightFrom + d + 24) % 24
-                updateNight(true)
-            },
-            Row("Dim until", { hour(store.nightUntil) }, { store.nightMode == HomeLogic.NIGHT_CUSTOM }) { d ->
-                store.nightUntil = (store.nightUntil + d + 24) % 24
-                updateNight(true)
-            },
-            Row("Animated background", { onOff(store.animated) }) {
-                store.animated = !store.animated
-                bg.animated = store.animated
-            },
-            Row("Weather", { onOff(store.showWeather) }) {
-                store.showWeather = !store.showWeather
-                updateWeather()
-                if (store.showWeather) refreshWeather(false)
-            },
-            Row("Location", { if (store.city.isBlank()) "Auto" + (if (store.place.isNotEmpty()) " · ${store.place}" else "") else store.city }) { askCity() },
-            Row("Temperature", { if (store.fahrenheit) "°F" else "°C" }) {
-                store.fahrenheit = !store.fahrenheit
-                updateWeather()
-            },
-            Row("Titles from your apps", { if (!TvFeed.allowed(this)) "Not allowed yet" else onOff(store.preview) }) {
-                if (!TvFeed.allowed(this)) {
-                    // READ_TV_LISTINGS can't be granted from a prompt on the TV, only with adb
-                    Toast.makeText(this, "Needs a one-time adb grant: the README has the command", Toast.LENGTH_LONG).show()
-                } else {
-                    store.preview = !store.preview
-                    loadFeed()
+        return listOf(
+            Tab("Look", "How the home screen looks. The picture shows your home as it is now and follows every change.", preview = true, rows = listOf(
+                Row("Home style", "The layout of the home screen", { HomeLogic.STYLE_NAMES[store.style - 1] }) {
+                    store.style = if (store.style == HomeLogic.CINEMA) HomeLogic.DRIFT else HomeLogic.CINEMA
+                    render(null)
+                },
+                Row("Theme", "The glow colours and the colour of highlights", { Themes.ALL[store.theme].name }) { d ->
+                    store.theme = (store.theme + d + Themes.ALL.size) % Themes.ALL.size
+                    applyTheme()
+                },
+                Row("Icon style", "How the icons of your apps are drawn", { IconStyles.NAMES[store.iconStyle] }) { d ->
+                    store.iconStyle = (store.iconStyle + d + IconStyles.NAMES.size) % IconStyles.NAMES.size
+                    reload(null)
+                },
+                Row("Animated background", "Colours that drift slowly behind the home", { onOff(store.animated) }) {
+                    store.animated = !store.animated
+                    bg.animated = store.animated
                 }
-            },
-            Row("Recently used apps first", { onOff(store.showRecent) }) {
-                store.showRecent = !store.showRecent
-                render(null)
-            },
-            Row("Home button opens Aurora", { homeLabel() }) {
-                if (!HomeGuardService.canSwitch(this) && !HomeGuardService.isEnabled(this)) {
-                    Toast.makeText(this, "Needs a one-time adb grant: the README has the command", Toast.LENGTH_LONG).show()
-                } else {
-                    store.homeButton = !store.homeButton
-                    syncHomeGuard()
+            )),
+            Tab("Home", "What is on the home screen: your apps, what they offer to watch, and the weather.",
+                stats = { listOf("APPS ON THE HOME" to num(apps.count { it.key !in store.hidden.toSet() }), "HIDDEN" to num(store.hidden.size)) }, rows = listOf(
+                Row("Titles from your apps", "Films, series and music your apps offer for the home screen",
+                    { if (!TvFeed.allowed(this)) "Not allowed yet" else onOff(store.preview) }) {
+                    if (!TvFeed.allowed(this)) {
+                        // READ_TV_LISTINGS can't be granted from a prompt on the TV, only with adb
+                        Toast.makeText(this, "Needs a one-time adb grant: the README has the command", Toast.LENGTH_LONG).show()
+                    } else {
+                        store.preview = !store.preview
+                        loadFeed()
+                    }
+                },
+                Row("Recently used apps first", "The apps you opened last move to the front", { onOff(store.showRecent) }) {
+                    store.showRecent = !store.showRecent
+                    render(null)
+                },
+                Row("Hidden apps", "Apps you keep off the home screen", { num(store.hidden.size) }, steps = false) { askHidden() },
+                Row("Weather", "Temperature and sky in the corner of the home", { onOff(store.showWeather) }) {
+                    store.showWeather = !store.showWeather
+                    updateWeather()
+                    if (store.showWeather) refreshWeather(false)
+                },
+                Row("Location", "The place the weather is for; Auto finds it by itself",
+                    { if (store.city.isBlank()) "Auto" + (if (store.place.isNotEmpty()) " · ${store.place}" else "") else store.city },
+                    { store.showWeather }, steps = false) { askCity() },
+                Row("Temperature", "Celsius or Fahrenheit", { if (store.fahrenheit) "°F" else "°C" }, { store.showWeather }) {
+                    store.fahrenheit = !store.fahrenheit
+                    updateWeather()
                 }
-            },
-            Row("Pause music when another app opens", { onOff(store.pauseOnSwitch) }) {
-                store.pauseOnSwitch = !store.pauseOnSwitch
-            },
-            Row("TV channels", { Iptv.label(store) }) { askIptv() },
-            Row("Channels open in", { iptvApp()?.label ?: "" }, { Iptv.on(store) }) { d ->
-                val hidden = store.hidden.toSet()
-                val l = apps.filter { it.key !in hidden && !it.key.endsWith("/googletv") && it.pkg != packageName }.distinctBy { it.pkg }
-                if (l.isNotEmpty()) {
-                    store.iptvApp = l[(l.indexOfFirst { it.pkg == iptvApp()?.pkg } + d + l.size) % l.size].pkg
-                    loadFeed()
+            )),
+            Tab("Music & screensaver", "What moves on the screen while music plays, when the home is left alone, and how it darkens at night.", rows = listOf(
+                Row("Music visualizer", "A scene that moves with the music on the home screen", { vizLabel() }) { d ->
+                    store.visualizer = (store.visualizer + d + VisualizerView.MODES.size) % VisualizerView.MODES.size
+                    viz.evaluate()
+                    onVisualizerChanged()
+                },
+                Row("Visualizer rotation", "Changes the scene by itself", { rotNames[store.vizRotate] }, { store.visualizer != 0 }) { d ->
+                    store.vizRotate = (store.vizRotate + d + 4) % 4
+                    viz.evaluate()
+                },
+                Row("Screensaver", "Starts when the home screen has been left alone this long", { saverNames[store.saver] }) { d ->
+                    store.saver = (store.saver + d + 5) % 5
+                    lastInteraction = android.os.SystemClock.elapsedRealtime()
+                },
+                Row("Screensaver scene", "What the screensaver shows",
+                    { if (store.saverMode == -1) "Rotate" else VisualizerView.MODES[store.saverMode] }, { store.saver != 0 }) { d ->
+                    val i = saverScenes.indexOf(store.saverMode).coerceAtLeast(0)
+                    store.saverMode = saverScenes[(i + d + saverScenes.size) % saverScenes.size]
+                },
+                Row("Night dimming", "Darkens the home screen during the night", { nightNames[store.nightMode] }) { d ->
+                    store.nightMode = (store.nightMode + d + 3) % 3
+                    updateNight(true)
+                },
+                Row("Dim from", "The hour the dimming starts", { hour(store.nightFrom) }, { store.nightMode == HomeLogic.NIGHT_CUSTOM }) { d ->
+                    store.nightFrom = (store.nightFrom + d + 24) % 24
+                    updateNight(true)
+                },
+                Row("Dim until", "The hour the dimming ends", { hour(store.nightUntil) }, { store.nightMode == HomeLogic.NIGHT_CUSTOM }) { d ->
+                    store.nightUntil = (store.nightUntil + d + 24) % 24
+                    updateNight(true)
                 }
-            },
-            Row("Extra artwork (TMDB)", { Tmdb.label(store) }) {
-                if (store.tmdbKey.isEmpty() || Tmdb.keyRefused) askTmdbKey()
-                else { store.tmdb = !store.tmdb; currentStyle?.onFeed(); render(null) }
-            },
-            Row("Ad blocker", { AdBlock.label(this, store) }) { d ->
-                AdBlock.choose(this, store, (store.adblock + d + 2) % 2)
-                // the count and the state change in the background: show them while the panel is open
-                for (t in longArrayOf(1500, 4000)) handler.postDelayed({ refreshPanel?.invoke() }, t)
-            },
-            Row("Settings backup", { backupLabel() }) { askBackup() },
-            Row("Hidden apps", { "${store.hidden.size}" }) { askHidden() }
+            )),
+            Tab("Content", "Extras for what your apps offer. Extra artwork adds full-screen pictures, title logos, ratings and descriptions from TMDB, with your own free key. " +
+                "TV channels shows the five channels you watched last, with what is on now and next.",
+                stats = {
+                    val out = ArrayList<Pair<String, String>>()
+                    if (Tmdb.on(store)) Tmdb.matched(this).let { (found, all) -> out += "TITLES WITH EXTRA ARTWORK" to "${num(found)} of ${num(all)} looked up" }
+                    if (Iptv.on(store)) {
+                        out += "PROGRAMME GUIDE" to (if (Iptv.guideTime == 0L) Iptv.label(store)
+                            else "Read " + SimpleDateFormat("d MMM HH:mm", Locale.getDefault()).format(Date(Iptv.guideTime)) + "  ·  " + num(Iptv.guideChannels) + " channels")
+                        out += "WATCHED LAST" to (Iptv.decode(store.iptvRecent).joinToString("\n") { it.name }.ifEmpty { "Nothing yet: watch a channel for half a minute" })
+                    }
+                    out
+                }, rows = listOf(
+                Row("Extra artwork (TMDB)", "Sharper pictures, logos, ratings and descriptions for films and series", { Tmdb.label(store) }, steps = false) {
+                    if (store.tmdbKey.isEmpty() || Tmdb.keyRefused) askTmdbKey()
+                    else { store.tmdb = !store.tmdb; currentStyle?.onFeed(); render(null) }
+                },
+                Row("TMDB key", "Your own free key from themoviedb.org", { if (store.tmdbKey.isEmpty()) "Not set" else "Set" }, steps = false) { askTmdbKey() },
+                Row("TV channels", "The channels you watched last, from your programme guide", { Iptv.label(store) }, steps = false) { askIptv() },
+                Row("Channels open in", "Your IPTV app; only its screen is read, only for the channel name", { iptvApp()?.label ?: "" }, { Iptv.on(store) }) { d ->
+                    val hidden = store.hidden.toSet()
+                    val l = apps.filter { it.key !in hidden && !it.key.endsWith("/googletv") && it.pkg != packageName }.distinctBy { it.pkg }
+                    if (l.isNotEmpty()) {
+                        store.iptvApp = l[(l.indexOfFirst { it.pkg == iptvApp()?.pkg } + d + l.size) % l.size].pkg
+                        loadFeed()
+                    }
+                }
+            )),
+            Tab("Ad blocker", "Refuses to look up the addresses of known ad and tracking servers, for every app on this device. " +
+                "It filters name lookups only, on the device itself; nothing is sent anywhere. Android asks for permission once. " +
+                "Ads that come from the same servers as the video itself (YouTube's) are not affected.",
+                stats = {
+                    listOf("STATUS" to (if (store.adblock == 0) "Off" else if (AdBlock.running) "Running" else AdBlock.label(this, store)),
+                        "BLOCK LIST" to (if (AdBlock.domains > 0) num(AdBlock.domains) + " addresses" else "Read when switched on"),
+                        "BLOCKED SINCE IT STARTED" to (if (AdBlock.running) num(AdBlock.blocked.get()) + " lookups" else "\u2014"))
+                }, rows = listOf(
+                Row("Ad blocker", "Blocks ads and trackers by their addresses", { onOff(store.adblock != 0) }) { d ->
+                    AdBlock.choose(this, store, (store.adblock + d + 2) % 2)
+                }
+            )),
+            Tab("System", "How Aurora works with the device.",
+                stats = { listOf("VERSION" to "Aurora " + BuildConfig.VERSION_NAME.replace("-", " "), "LAST BACKUP" to backupLabel()) }, rows = listOf(
+                Row("Home button opens Aurora", "The Home key of the remote comes here, not to the built-in home", { homeLabel() }) {
+                    if (!HomeGuardService.canSwitch(this) && !HomeGuardService.isEnabled(this)) {
+                        Toast.makeText(this, "Needs a one-time adb grant: the README has the command", Toast.LENGTH_LONG).show()
+                    } else {
+                        store.homeButton = !store.homeButton
+                        syncHomeGuard()
+                    }
+                },
+                Row("Pause music when another app opens", "Music does not play on under a film", { onOff(store.pauseOnSwitch) }) {
+                    store.pauseOnSwitch = !store.pauseOnSwitch
+                },
+                Row("Settings backup", "Save these settings, or bring saved ones back", { backupLabel() }, steps = false) { askBackup() }
+            ))
         )
+    }
+
+    /** Customize: a full-screen page, tabs along the top, the tab's settings on the left and what they are for on the right. */
+    internal fun openSettings() {
+        if (panel != null) return
+        val tabs = settingsTabs()
+        var cur = store.settingsTab.coerceIn(0, tabs.size - 1)
+        fun white(a: Int) = Color.argb(a, 255, 255, 255)
+        fun label(t: String, size: Float, color: Int, medium: Boolean = false) = TextView(this).apply {
+            text = t
+            setTextSize(TypedValue.COMPLEX_UNIT_PX, u(size).toFloat())
+            setTextColor(color)
+            if (medium) typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+        }
+        fun caps(t: String, color: Int) = label(t, 9.5f, color, true).apply { letterSpacing = 0.22f }
 
         val p = FrameLayout(this)
-        p.setBackgroundColor(Color.argb(150, 0, 0, 0))
+        p.background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(Color.rgb(14, 19, 38), Color.rgb(6, 8, 16)))
         p.isClickable = true
+        val page = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(u(48), u(30), u(48), u(16)) }
 
-        val col = LinearLayout(this).apply {
+        // ---- header
+        val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        head.addView(label("Customize", 25f, Color.WHITE).apply { typeface = Typeface.create("sans-serif-light", Typeface.NORMAL) })
+        if (isBeta) head.addView(caps("BETA", accent).apply {      // a beta build says so (the version name ends in "-beta")
+            background = rounded(Color.TRANSPARENT, u(9), u(1), accent)
+            setPadding(u(8), u(2.5f), u(7), u(2.5f))
+        }, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = u(14); topMargin = u(3) })
+        page.addView(head)
+
+        // ---- tabs
+        val tabBar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val tabViews = ArrayList<TextView>()
+        page.addView(tabBar, LinearLayout.LayoutParams(-1, -2).apply { topMargin = u(14); leftMargin = -u(4) })
+
+        // ---- body: settings left, card right
+        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val scroll = ScrollView(this).apply { isVerticalScrollBarEnabled = false; overScrollMode = View.OVER_SCROLL_NEVER; addView(list, ViewGroup.LayoutParams(-1, -2)) }
+        val side = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = rounded(Color.argb(238, 10, 14, 28), u(18), u(1), Color.argb(60, 255, 255, 255))
-            setPadding(u(20), u(14), u(20), u(10))
+            background = rounded(white(10), u(16), u(1), white(22))
+            setPadding(u(20), u(18), u(20), u(18))
         }
-        col.addView(TextView(this).apply {
-            // a beta build says so (the version name ends in "-beta")
-            text = if (isBeta) "CUSTOMIZE   ·   BETA" else "CUSTOMIZE"
-            setTextSize(TypedValue.COMPLEX_UNIT_PX, u(12).toFloat())
-            setTextColor(accent)
-            letterSpacing = 0.3f
-            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-            setPadding(u(6), 0, 0, u(8))
-        })
+        val body = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        body.addView(scroll, LinearLayout.LayoutParams(u(500), -1))
+        body.addView(side, LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = u(28) })
+        page.addView(body, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = u(16) })
 
-        val valueViews = ArrayList<Pair<Row, TextView>>()
+        // ---- footer
+        val foot = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        foot.addView(label("\u25C0 \u25B6  change      OK  select      BACK  close", 10f, white(110)), LinearLayout.LayoutParams(0, -2, 1f))
+        foot.addView(label("Aurora " + BuildConfig.VERSION_NAME.replace("-", " ") + "  ·  free, no ads, no account", 10f, white(110)))
+        page.addView(foot, LinearLayout.LayoutParams(-1, -2).apply { topMargin = u(10) })
+        p.addView(page, ViewGroup.LayoutParams(-1, -1))
+
+        val rowViews = ArrayList<Triple<Row, View, TextView>>()
+        var statsBox: LinearLayout? = null
         fun refresh() {
-            for ((r, v) in valueViews) {
-                v.text = "‹  ${r.value()}  ›"
-                (v.parent as View).visibility = if (r.shown()) View.VISIBLE else View.GONE
+            for ((r, line, v) in rowViews) {
+                v.text = if (r.steps) "\u2039   ${r.value()}   \u203A" else r.value()
+                line.visibility = if (r.shown()) View.VISIBLE else View.GONE
+            }
+            statsBox?.let { box ->
+                box.removeAllViews()
+                for ((k, v) in tabs[cur].stats()) {
+                    box.addView(caps(k, white(120)), LinearLayout.LayoutParams(-2, -2).apply { topMargin = u(14) })
+                    box.addView(label(v, 15f, Color.WHITE).apply { setLineSpacing(u(2).toFloat(), 1f) }, LinearLayout.LayoutParams(-2, -2).apply { topMargin = u(2) })
+                }
             }
         }
-        refreshPanel = { refresh() }
-        focusPanel = { (panelRow ?: col.getChildAt(1))?.requestFocus() }
+        fun styleTabs() {
+            for ((i, t) in tabViews.withIndex()) {
+                val has = t.isFocused
+                t.setTextColor(if (i == cur || has) Color.WHITE else white(140))
+                t.background = when {
+                    has -> rounded(white(46), u(15), u(2), accent)
+                    i == cur -> rounded(white(26), u(15))
+                    else -> null
+                }
+            }
+        }
+        fun visibleRows() = rowViews.filter { it.second.visibility == View.VISIBLE }.map { it.second }
 
-        var first: View? = null
-        for (r in rows) {
-            val rr = u(10)
-            val line = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
+        fun show(i: Int) {
+            cur = i
+            store.settingsTab = i
+            val tab = tabs[i]
+            list.removeAllViews(); rowViews.clear(); panelRow = null
+            scroll.scrollTo(0, 0)
+            for (r in tab.rows) {
+                val line = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    isFocusable = true
+                    isClickable = true
+                    setPadding(u(16), u(7.5f), u(16), u(8))
+                    background = rounded(white(10), u(11))
+                }
+                val names = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+                names.addView(label(r.title, 14.5f, Color.WHITE))
+                names.addView(label(r.desc, 10.5f, white(120)).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
+                line.addView(names, LinearLayout.LayoutParams(0, -2, 1f))
+                val value = label("", 13.5f, white(210)).apply { gravity = Gravity.END; maxLines = 1 }
+                line.addView(value, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = u(12) })
+                rowViews += Triple(r, line, value)
+
+                line.setOnFocusChangeListener { v, has ->
+                    v.background = if (has) rounded(white(40), u(11), u(2), accent) else rounded(white(10), u(11))
+                    value.setTextColor(if (has) accent else white(210))
+                    if (has) panelRow = v
+                }
+                line.setOnClickListener { r.act(1); refresh() }
+                line.setOnKeyListener { v, kc, ev ->
+                    val down = ev.action == KeyEvent.ACTION_DOWN
+                    when (kc) {
+                        KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                            if (down && r.steps) { r.act(if (kc == KeyEvent.KEYCODE_DPAD_LEFT) -1 else 1); refresh() }
+                            true
+                        }
+                        // above the first setting are the tabs; below the last there is nothing
+                        KeyEvent.KEYCODE_DPAD_UP -> if (visibleRows().firstOrNull() === v) { if (down) tabViews[cur].requestFocus(); true } else false
+                        KeyEvent.KEYCODE_DPAD_DOWN -> visibleRows().lastOrNull() === v
+                        else -> false
+                    }
+                }
+                list.addView(line, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = u(5) })
+            }
+
+            side.removeAllViews()
+            side.addView(caps(tab.name.uppercase(Locale.US), accent))
+            if (tab.preview) {
+                val w = u(296)      // the card's inner width: 864 - 500 - 28 - 2 x 20
+                side.addView(MirrorView(this, rootView) { listOf(panel, dim) }, LinearLayout.LayoutParams(w, w * 9 / 16).apply { topMargin = u(12) })
+            }
+            side.addView(label(tab.blurb, 12f, white(170)).apply { setLineSpacing(u(3).toFloat(), 1f) }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = u(10) })
+            statsBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            side.addView(statsBox)
+            refresh()
+            styleTabs()
+        }
+
+        for ((i, tab) in tabs.withIndex()) {
+            val t = label(tab.name, 13.5f, white(140), true).apply {
                 isFocusable = true
                 isClickable = true
-                setPadding(u(12), u(1.8f), u(12), u(1.8f))
+                setPadding(u(15), u(6), u(15), u(6.5f))
             }
-            line.addView(TextView(this).apply {
-                text = r.title
-                setTextSize(TypedValue.COMPLEX_UNIT_PX, u(14).toFloat())
-                setTextColor(Color.WHITE)
-            }, LinearLayout.LayoutParams(0, -2, 1f))
-            val value = TextView(this).apply {
-                setTextSize(TypedValue.COMPLEX_UNIT_PX, u(14).toFloat())
-                setTextColor(Color.argb(200, 255, 255, 255))
-                gravity = Gravity.END
+            t.setOnFocusChangeListener { _, has -> if (has && cur != i) show(i) else styleTabs() }
+            t.setOnKeyListener { _, kc, ev ->
+                val down = ev.action == KeyEvent.ACTION_DOWN
+                when (kc) {
+                    KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> { if (down) visibleRows().firstOrNull()?.requestFocus(); true }
+                    KeyEvent.KEYCODE_DPAD_UP -> true
+                    KeyEvent.KEYCODE_DPAD_LEFT -> i == 0
+                    KeyEvent.KEYCODE_DPAD_RIGHT -> i == tabs.size - 1
+                    else -> false
+                }
             }
-            line.addView(value, LinearLayout.LayoutParams(-2, -2))
-            valueViews += r to value
-
-            line.setOnFocusChangeListener { v, has ->
-                v.background = if (has) rounded(Color.argb(46, 255, 255, 255), rr, u(2), accent) else null
-                if (has) panelRow = v
-            }
-            line.setOnClickListener { r.act(1); refresh() }
-            line.setOnKeyListener { _, kc, ev ->
-                if (kc == KeyEvent.KEYCODE_DPAD_LEFT || kc == KeyEvent.KEYCODE_DPAD_RIGHT) {
-                    if (ev.action == KeyEvent.ACTION_DOWN) {
-                        r.act(if (kc == KeyEvent.KEYCODE_DPAD_LEFT) -1 else 1)
-                        refresh()
-                    }
-                    true
-                } else false
-            }
-            col.addView(line, LinearLayout.LayoutParams(-1, -2))
-            if (first == null) first = line
+            tabViews += t
+            tabBar.addView(t, LinearLayout.LayoutParams(-2, -2).apply { rightMargin = u(4) })
         }
-        col.addView(TextView(this).apply {
-            text = "Aurora " + BuildConfig.VERSION_NAME.replace("-", " ") + "  ·  free, no ads, no account"
-            setTextSize(TypedValue.COMPLEX_UNIT_PX, u(10).toFloat())
-            setTextColor(Color.argb(110, 255, 255, 255))
-            setPadding(u(6), u(10), 0, 0)
-        })
-        refresh()
 
-        // the list scrolls when it is taller than the screen
-        val sheet = ScrollView(this).apply { isVerticalScrollBarEnabled = false; overScrollMode = View.OVER_SCROLL_NEVER }
-        sheet.addView(col, ViewGroup.LayoutParams(-1, -2))
-        p.addView(sheet, FrameLayout.LayoutParams(u(400), -2, Gravity.END or Gravity.CENTER_VERTICAL).apply {
-            setMargins(0, u(12), u(30), u(12))
-        })
+        refreshPanel = { refresh() }
+        focusPanel = { (panelRow ?: visibleRows().firstOrNull() ?: tabViews[cur]).requestFocus() }
         rootView.addView(p, rootView.indexOfChild(dim), ViewGroup.LayoutParams(-1, -1))      // (under the night veil)
         panel = p
         host.descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
-        first?.requestFocus()
+        show(cur)
+        focusPanel?.invoke()
+        // figures change in the background (lookups blocked, the guide being read)
+        handler.postDelayed(panelTick, 2000)
+    }
+
+    private val panelTick = object : Runnable {
+        override fun run() {
+            if (panel == null) return
+            refreshPanel?.invoke()
+            handler.postDelayed(this, 2000)
+        }
     }
 
     private fun closeSettings() {
+        handler.removeCallbacks(panelTick)
         panel?.let { rootView.removeView(it) }
         panel = null
         refreshPanel = null

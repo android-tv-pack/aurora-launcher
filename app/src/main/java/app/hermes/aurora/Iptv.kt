@@ -256,6 +256,10 @@ internal object Iptv {
 
     fun on(store: Store) = store.iptv && store.iptvGuide.isNotEmpty()
 
+    /** when the guide was read last (0 = not yet) and how many of its channels have a logo, for Customize */
+    val guideTime: Long get() = guideAt
+    val guideChannels: Int get() = icons.size
+
     fun label(store: Store): String = when {
         !on(store) -> "Off"
         busy && nameToId.isEmpty() -> "Loading the guide"

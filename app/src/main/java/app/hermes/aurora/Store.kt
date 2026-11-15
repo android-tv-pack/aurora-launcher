@@ -121,6 +121,11 @@ class Store(ctx: Context) {
         get() = list("previewsAsked")
         set(v) { putList("previewsAsked", v.distinct()) }
 
+    /** the tab Customize was left on */
+    var settingsTab: Int
+        get() = p.getInt("settingsTab", 0)
+        set(v) { p.edit().putInt("settingsTab", v).apply() }
+
     var pauseOnSwitch: Boolean
         get() = p.getBoolean("pauseOnSwitch", true)
         set(v) { p.edit().putBoolean("pauseOnSwitch", v).apply() }

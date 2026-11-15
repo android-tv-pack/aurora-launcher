@@ -147,6 +147,12 @@ internal object Tmdb {
         else -> "On"
     }
 
+    /** how many titles TMDB had something for, of those looked up lately (for Customize) */
+    fun matched(ctx: Context): Pair<Int, Int> = try {
+        val all = prefs(ctx).all.values
+        all.count { it is String && !it.contains("\"none\":true") } to all.size
+    } catch (_: Exception) { 0 to 0 }
+
     private fun lang(): String = Locale.getDefault().language.ifEmpty { "en" }
 
     /** a `tmdb-key.txt` dropped into the app's files folder is taken once at start and removed */
