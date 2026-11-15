@@ -12,6 +12,16 @@ It is a personal project, built and tested on a Xiaomi TV Box S (3rd gen, Androi
 - **Built-in AirPlay receiver** (screen mirroring, audio, video), see below.
 - Pauses music when another app opens (optional), weather, hidden apps, settings backup to a JSON file.
 
+## Screenshots
+
+From the beta.
+
+| Cinema home | Drift home |
+|---|---|
+| ![The Cinema home style](docs/screenshots/home-cinema.jpg) | ![The Drift home style](docs/screenshots/home-drift.jpg) |
+
+![Customize: music visualizer and screensaver](docs/screenshots/customize.jpg)
+
 ## Credits and license
 
 Aurora contains the AirPlay receiver by **jqssun**, [android-airplay-server](https://github.com/jqssun/android-airplay-server), which is based on [UxPlay](https://github.com/FDH2/UxPlay) and is licensed **GPLv3**. Because of that, **Aurora is licensed under the GNU GPL v3** as well; see [LICENSE](LICENSE). The receiver's Kotlin sources are copied into `app/src/main/kotlin/io/github/jqssun/airplay`, and its native code is built from the `third_party/android-airplay-server` submodule (the upstream project, pinned to a fixed commit).
