@@ -42,10 +42,38 @@ class Store(ctx: Context) {
         get() = p.getInt("visualizer", 0).coerceIn(0, 12)
         set(v) { p.edit().putInt("visualizer", v).apply() }
 
-    /** 1 = Cinema, 2 = Horizon, 3 = Command (0 was the old Classic screen, which was removed: it maps to Cinema) */
+    init {
+        // settings written by a version with the three old styles: Cinema -> Marquee, Horizon and Command -> Drift
+        if (p.getInt("styleV", 0) < 2) {
+            val ed = p.edit().putInt("styleV", 2)
+            if (p.contains("style")) ed.putInt("style", HomeLogic.migrateStyle(p.getInt("style", 1)))
+            ed.apply()
+        }
+    }
+
+    /** 1 = Marquee, 2 = Drift (see HomeLogic) */
     var style: Int
-        get() = p.getInt("style", 1).coerceIn(1, 3)
-        set(v) { p.edit().putInt("style", v.coerceIn(1, 3)).apply() }
+        get() = p.getInt("style", HomeLogic.MARQUEE).coerceIn(HomeLogic.MARQUEE, HomeLogic.DRIFT)
+        set(v) { p.edit().putInt("style", v.coerceIn(HomeLogic.MARQUEE, HomeLogic.DRIFT)).apply() }
+
+    /** night dimming: 0 Off, 1 Auto (23:00 to 07:00), 2 the hours below */
+    var nightMode: Int
+        get() = p.getInt("nightMode", HomeLogic.NIGHT_AUTO).coerceIn(0, 2)
+        set(v) { p.edit().putInt("nightMode", v).apply() }
+
+    /** custom night hours, 0..23: dim from [nightFrom] until [nightUntil] (may cross midnight) */
+    var nightFrom: Int
+        get() = p.getInt("nightFrom", HomeLogic.AUTO_FROM).coerceIn(0, 23)
+        set(v) { p.edit().putInt("nightFrom", v).apply() }
+
+    var nightUntil: Int
+        get() = p.getInt("nightUntil", HomeLogic.AUTO_UNTIL).coerceIn(0, 23)
+        set(v) { p.edit().putInt("nightUntil", v).apply() }
+
+    /** titles pinned from the lanes (hold OK on a card); a plain string, so it travels with the settings backup */
+    internal var pins: List<HomeLogic.Pin>
+        get() = HomeLogic.decodePins(p.getString("pins", "") ?: "")
+        set(v) { p.edit().putString("pins", HomeLogic.encodePins(v)).apply() }
 
     /** pause a playing music/video app when another app comes to the front */
     var pauseOnSwitch: Boolean
@@ -107,6 +135,11 @@ class Store(ctx: Context) {
                 else -> continue
             }
             n++
+        }
+        // a backup made before the two new styles holds one of the old style numbers
+        if (!o.has("styleV")) {
+            ed.putInt("styleV", 2)
+            o.optJSONArray("style")?.let { ed.putInt("style", HomeLogic.migrateStyle(it.optInt(1, 1))) }
         }
         ed.apply()
         return n
