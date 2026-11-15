@@ -19,8 +19,8 @@ android {
         applicationId = "app.hermes.aurora"
         minSdk = 24
         targetSdk = 34
-        versionCode = 33
-        versionName = "3.19-beta"
+        versionCode = 34
+        versionName = "3.20-beta"
 
         // the Xiaomi TV Box S is 32-bit; add "arm64-v8a" here for a 64-bit device
         ndk { abiFilters += listOf("armeabi-v7a") }
