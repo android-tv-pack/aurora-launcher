@@ -121,7 +121,7 @@ internal object Tmdb {
         if (rating > 0 && votes >= 20) "★ " + String.format(Locale.US, "%.1f", rating) else null
     ).joinToString("  ·  ")
 
-    fun cacheKey(title: String, kind: Int, lang: String) = "2|" + norm(cleanTitle(title)) + "|" + (if (kind == KIND_MOVIE) "m" else if (kind in KIND_SERIES..KIND_EPISODE) "t" else "x") + "|" + lang
+    fun cacheKey(title: String, kind: Int, lang: String) = "4|" + norm(cleanTitle(title)) + "|" + (if (kind == KIND_MOVIE) "m" else if (kind in KIND_SERIES..KIND_EPISODE) "t" else "x") + "|" + lang
 
     // ---------------------------------------------------------------- the service
 
@@ -232,7 +232,14 @@ internal object Tmdb {
         return out
     }
 
-    private fun fetch(key: String, title: String, kind: Int, year: Int): Extra? {
+    /**
+     * What an app says a title is can be wrong (a series published as a film): when nothing is found as the
+     * stated kind, the title is looked for once more as either.
+     */
+    private fun fetch(key: String, title: String, kind: Int, year: Int): Extra? =
+        fetchAs(key, title, kind, year) ?: if (kind != KIND_UNKNOWN) fetchAs(key, title, KIND_UNKNOWN, year) else null
+
+    private fun fetchAs(key: String, title: String, kind: Int, year: Int): Extra? {
         val l = lang()
         val q = "query=" + URLEncoder.encode(cleanTitle(title), "UTF-8") + "&language=$l&include_adult=false"
         val (path, forceTv) = when (kind) {
@@ -307,11 +314,12 @@ internal object Tmdb {
 
     /** [cb] gets what TMDB has for the item (on the main thread), or null. Asked once per title; answers are kept. */
     fun lookup(ctx: Context, store: Store, item: TvFeed.Item, cb: (Extra?) -> Unit) {
-        if (!on(store) || !lookable(item.type, item.square)) { cb(null); return }
+        if (!on(store)) { cb(null); return }
+        if (!lookable(item.type, item.square)) { android.util.Log.d("AuroraTmdb", "not looked up (type ${item.type}, square ${item.square}): ${item.title}"); cb(null); return }
         val k = cacheKey(item.title, item.type, lang())
         synchronized(mem) { if (mem.containsKey(k)) { cb(mem[k]); return } }
         val (hit, x) = stored(ctx, k)
-        if (hit) { synchronized(mem) { mem[k] = x }; cb(x); return }
+        if (hit) { android.util.Log.d("AuroraTmdb", "kept answer for '${item.title}' (type ${item.type}, year ${item.year}): ${if (x == null) "not found" else x.meta}"); synchronized(mem) { mem[k] = x }; cb(x); return }
         synchronized(waiting) {
             val l = waiting[k]
             if (l != null) { l.add(cb); return }
@@ -323,7 +331,7 @@ internal object Tmdb {
             var ok = true
             val r: Extra? = try { fetch(key, item.title, item.type, item.year) } catch (e: Exception) { ok = false; null }
             if (ok) { store(app, k, r); synchronized(mem) { mem[k] = r } }       // a failed request is asked again later
-            android.util.Log.d("AuroraTmdb", "${item.title} -> ${if (!ok) "failed" else if (r == null) "not found" else r.meta}")
+            android.util.Log.d("AuroraTmdb", "${item.title} (type ${item.type}, year ${item.year}) -> ${if (!ok) "failed" else if (r == null) "not found" else r.meta}")
             main.post {
                 val l = synchronized(waiting) { waiting.remove(k) } ?: return@post
                 for (c in l) c(r)
