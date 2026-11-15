@@ -65,7 +65,7 @@ Android does not let an app grant itself these permissions, and there is no prom
 | Visualizer that reacts to the music (listens to the audio output, not a microphone) | `adb shell pm grant app.hermes.aurora android.permission.RECORD_AUDIO` |
 | Now Playing card with Prev / Pause / Next / Stop | `adb shell cmd notification allow_listener app.hermes.aurora/app.hermes.aurora.MediaListener` |
 | Titles from your apps (the lanes, Resume, Spotify shelves) | `adb shell pm grant app.hermes.aurora android.permission.READ_TV_LISTINGS` |
-| Home button opens Aurora (Aurora switches its own accessibility service on) | `adb shell pm grant app.hermes.aurora android.permission.WRITE_SECURE_SETTINGS` |
+| Home button opens Aurora | No computer needed: Customize > System > *Home button opens Aurora* shows the way to Android's Accessibility settings, where you switch on "Aurora Home button". With this grant Aurora switches it on by itself, and back on after an update: `adb shell pm grant app.hermes.aurora android.permission.WRITE_SECURE_SETTINGS` |
 | AirPlay screen over other apps, and its notification | `adb shell appops set app.hermes.aurora SYSTEM_ALERT_WINDOW allow` and `adb shell pm grant app.hermes.aurora android.permission.POST_NOTIFICATIONS` |
 
 The grants survive updates. Do not `pm clear` Aurora: that wipes the hidden apps, styles and the notification-listener grant.

@@ -11,7 +11,7 @@ import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
 
 /**
- * Makes Aurora the Home screen on a box whose firmware insists on Google TV's launcher.
+ * Makes Aurora the Home screen on a device whose firmware insists on its own launcher (Google TV's, Android TV's ...).
  * Android TV won't let another app replace it (its Home filter has the top priority), so instead this
  * accessibility service
  *   - takes the Home button before the system sees it and opens Aurora,
@@ -61,7 +61,7 @@ class HomeGuardService : AccessibilityService() {
         // just (re)started, e.g. after boot: if the system is showing Google TV, bring Aurora up
         // (the service can connect after Google TV's screen is already up, so right after boot don't wait for an event)
         val justBooted = android.os.SystemClock.elapsedRealtime() < 3 * 60 * 1000
-        h.postDelayed({ if (enabled() && !gtvMode && (front == GTV || justBooted)) goAurora() }, 2000)
+        h.postDelayed({ if (enabled() && !gtvMode && (front == homePkg(this) || justBooted)) goAurora() }, 2000)
     }
 
     override fun onDestroy() { if (instance === this) instance = null; super.onDestroy() }
@@ -77,7 +77,7 @@ class HomeGuardService : AccessibilityService() {
         front = pkg
         if (changed) pauseMusicFor(pkg)
         if (!looking && pkg == st.iptvApp && Iptv.on(st)) { looking = true; h.postDelayed(look, 1000) }
-        if (pkg == GTV) {
+        if (pkg == homePkg(this)) {
             if (!enabled() || gtvMode) return
             goAurora()
         } else {
@@ -87,7 +87,7 @@ class HomeGuardService : AccessibilityService() {
 
     /** A real app came to the front (not Aurora, Google TV, settings, dialogs): stop the music that is still playing behind it. */
     private fun pauseMusicFor(pkg: String) {
-        if (pkg == packageName || pkg == GTV || !Store(this).pauseOnSwitch) return
+        if (pkg == packageName || pkg == homePkg(this) || !Store(this).pauseOnSwitch) return
         if (IGNORE.any { pkg.contains(it) }) return
         if (packageManager.getLeanbackLaunchIntentForPackage(pkg) == null && packageManager.getLaunchIntentForPackage(pkg) == null) return
         NowPlaying.pauseOthers(this, pkg)
@@ -133,7 +133,25 @@ class HomeGuardService : AccessibilityService() {
     }
 
     companion object {
-        const val GTV = "com.google.android.apps.tv.launcherx"
+        /**
+         * The home screen the device came with (Google TV's on newer boxes, Android TV's on older TVs, a maker's own):
+         * the Home activity of the highest priority that is not Aurora and not a setup or fallback screen.
+         */
+        @Volatile private var home: ComponentName? = null
+        fun systemHome(ctx: Context): ComponentName? {
+            home?.let { return it }
+            return try {
+                ctx.packageManager.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), 0)
+                    .filter { r ->
+                        val p = r.activityInfo.packageName
+                        p != ctx.packageName && !p.contains("setupwraith") && !p.contains("settings") && !p.contains("provision") && r.activityInfo.exported
+                    }
+                    .maxByOrNull { it.priority }
+                    ?.let { ComponentName(it.activityInfo.packageName, it.activityInfo.name) }
+                    ?.also { home = it }
+            } catch (_: Exception) { null }
+        }
+        fun homePkg(ctx: Context): String = systemHome(ctx)?.packageName ?: "com.google.android.apps.tv.launcherx"
         /** windows that are not "another app": system UI, settings, installers, voice search, the remote-control helper */
         private val IGNORE = listOf("systemui", "inputmethod", "tv.settings", "permissioncontroller", "packageinstaller", "katniss",
             "googlequicksearchbox", "com.google.android.gms", "com.pult.tv", "setupwraith", "tvlauncher", "android.tv.provision")
@@ -143,11 +161,12 @@ class HomeGuardService : AccessibilityService() {
         @Volatile var gtvMode = false
 
         fun openGoogleTv(ctx: Context) {
+            val comp = systemHome(ctx) ?: return
             gtvMode = true
             try {
                 ctx.startActivity(
                     Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
-                        .setComponent(ComponentName(GTV, "$GTV.home.HomeActivity"))
+                        .setComponent(comp)
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 )
             } catch (_: Exception) { gtvMode = false }

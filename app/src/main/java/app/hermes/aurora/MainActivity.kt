@@ -392,13 +392,14 @@ class MainActivity : Activity() {
 
     /** The stock Google TV home has no app-list entry of its own, so give it a tile: Aurora is the Home app, this is the way to its recommendations. */
     private fun googleTvEntry(): AppEntry? = try {
-        val pkg = "com.google.android.apps.tv.launcherx"
-        val comp = ComponentName(pkg, "$pkg.home.HomeActivity")
+        val comp = HomeGuardService.systemHome(this) ?: throw IllegalStateException("no home")
+        val pkg = comp.packageName
         packageManager.getActivityInfo(comp, 0)
         val ai = packageManager.getApplicationInfo(pkg, 0)
         val i = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).setComponent(comp)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        AppEntry("$pkg/googletv", pkg, "Google TV", i, ai.loadBanner(packageManager),
+        // (the name the device's own home screen goes by: Google TV on newer boxes, else what it calls itself)
+        AppEntry("$pkg/googletv", pkg, if (pkg.endsWith("launcherx")) "Google TV" else ai.loadLabel(packageManager).toString().ifBlank { "Home" }, i, ai.loadBanner(packageManager),
             ai.loadIcon(packageManager), true)
     } catch (e: Exception) { null }
 
@@ -789,7 +790,29 @@ class MainActivity : Activity() {
     private fun homeLabel(): String = when {
         !store.homeButton -> "Off"
         HomeGuardService.isEnabled(this) -> "On"
-        else -> "Needs setup"
+        else -> "One step left"
+    }
+
+    /**
+     * The Home button needs Aurora's service switched on in Android's accessibility settings. Android lets only the
+     * person at the TV do that (an app may not), so the way there is shown and the settings are opened.
+     */
+    private fun askHomeStep() {
+        // Some TVs have a page for exactly this; many answer the request with an empty stand-in, and then only the
+        // settings' front page can be opened and the way from there is told.
+        fun real(i: Intent) = try { packageManager.resolveActivity(i, 0)?.activityInfo?.packageName?.let { !it.contains("stubs") } == true } catch (_: Exception) { false }
+        val direct = Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS).takeIf { real(it) }
+        val where = if (direct != null) "On the next screen choose \u201CAurora Home button\u201D and switch it on."
+            else "In the settings open Accessibility (it is under Device Preferences or System), choose \u201CAurora Home button\u201D and switch it on."
+        Sheet(this, "One step in Android's settings",
+            "Android lets only you allow an app to take the Home button.\n\n$where " +
+            "Android then warns that such a service can read the screen and what is typed: Aurora uses it for the Home key (and, if you switch on TV channels, to read the channel name your TV app shows), and nothing leaves this device.\n\n" +
+            "Then come back to Aurora. Holding Home still opens the home screen the device came with.")
+            .button("Open settings", primary = true) {
+                for (i in listOfNotNull(direct, Intent(android.provider.Settings.ACTION_SETTINGS))) { try { startActivity(i); break } catch (_: Exception) {} }
+            }
+            .button("Not now") { store.homeButton = false; refreshPanel?.invoke() }
+            .show { focusPanel?.invoke() }
     }
 
     /** keeps the accessibility service in line with the setting (it is switched off when an app is force-stopped) */
@@ -947,11 +970,12 @@ class MainActivity : Activity() {
                     out
                 }, rows = listOf(
                 Row("Home button opens Aurora", "The Home key of the remote comes here, not to the built-in home", { homeLabel() }) {
-                    if (!HomeGuardService.canSwitch(this) && !HomeGuardService.isEnabled(this)) {
-                        Toast.makeText(this, "Needs a one-time adb grant: the README has the command", Toast.LENGTH_LONG).show()
-                    } else {
+                    val running = HomeGuardService.isEnabled(this)
+                    if (store.homeButton && !running && !HomeGuardService.canSwitch(this)) askHomeStep()      // (chosen, but Android's switch is still off)
+                    else {
                         store.homeButton = !store.homeButton
                         syncHomeGuard()
+                        if (store.homeButton && !running && !HomeGuardService.canSwitch(this)) askHomeStep()
                     }
                 },
                 Row("Pause music when another app opens", "Music does not play on under a film", { onOff(store.pauseOnSwitch) }) {
