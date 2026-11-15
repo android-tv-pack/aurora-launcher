@@ -43,62 +43,39 @@ import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
+
 /**
  * Aurora: a modern, dark, free TV launcher. No accounts, no premium tier, no ads.
- * Network is used only for the weather widget (Open-Meteo, no key) and can be switched off.
+ * Network is used only for the weather (Open-Meteo, no key) and the artwork apps publish.
  *
- *  - animated themed background, big clock, date, network name, weather
- *  - FAVORITES, RECENT and ALL APPS rows
- *  - hold OK on an app: pin / reorder / hide / app info / uninstall
- *  - MENU key (or "Customize"): theme, animation, tile size, weather, city, units, recents, hidden apps
+ *  - two home styles, Marquee and Drift (see MarqueeStyle, DriftStyle), over an animated scene or the theme's colours
+ *  - hold OK on an app: pin / reorder / hide / app info / uninstall; hold OK on a title: pin
+ *  - MENU or INFO key (or the on-screen "Customize"): style, theme, icons, visualizer, night dimming, weather ...
  */
 class MainActivity : Activity() {
 
-    private class Row(val title: String, val value: () -> String, val act: (Int) -> Unit)
+    private class Row(val title: String, val value: () -> String, val shown: () -> Boolean = { true }, val act: (Int) -> Unit)
 
     internal lateinit var store: Store
     private lateinit var rootView: FrameLayout
     internal lateinit var bg: AuroraView
-    private lateinit var scroll: ScrollView
-    private lateinit var content: LinearLayout
-
-    private var clock: TextView? = null
-    private var dateView: TextView? = null
-    private var weatherMain: TextView? = null
-    private var weatherSub: TextView? = null
     private var weatherError: String? = null
     private var fetching = false
 
-    // ---- "what to watch next" backdrop
     internal val handler = Handler(Looper.getMainLooper())
     internal var feed: Map<String, List<TvFeed.Item>> = emptyMap()
-    private lateinit var backdrop: ImageView
-    private lateinit var backdropInfo: LinearLayout
-    private lateinit var infoKind: TextView
-    private lateinit var infoTitle: TextView
-    private lateinit var infoDesc: TextView
-    private var shownPkg: String? = null
-    private var shownIndex = 0
-    private var shownUrl: String? = null
-    private val showRunnable = Runnable { showFor(pendingEntry) }
-    private var pendingEntry: AppEntry? = null
-    private val cycleRunnable = object : Runnable {
-        override fun run() {
-            val pkg = shownPkg ?: return
-            val items = feed[pkg] ?: return
-            if (items.size > 1) {
-                shownIndex = (shownIndex + 1) % items.size
-                showItem(items[shownIndex], true)
-                handler.postDelayed(this, 9000)
-            }
-        }
-    }
 
-    // ---- selectable home styles (0 Classic, 1 Cinema, 2 Horizon, 3 Command)
+    // ---- the home style on screen (Marquee or Drift)
     private lateinit var host: FrameLayout
     internal lateinit var viz: VisualizerView
     private var currentStyle: HomeStyle? = null
     internal var lastKey: String? = null
+    /** the black veil of the night dimming, above everything else */
+    private lateinit var dim: View
+    private var nightOn = false
+    private val dimAgain = Runnable { if (nightOn) dim.animate().alpha(1f).setDuration(1500).start() }
+    /** a full-screen picture hides the scene and the theme's colours: they stop drawing meanwhile */
+    private var covered = false
 
     private var panel: FrameLayout? = null
     private var refreshPanel: (() -> Unit)? = null
@@ -107,7 +84,7 @@ class MainActivity : Activity() {
     private var renderedRecents = ""
 
     private var apps: List<AppEntry> = emptyList()
-    private val tiles = LinkedHashMap<String, View>()
+    private var appByPkg: Map<String, AppEntry> = emptyMap()
     private var loading = false
     private var dirty = false
     /** the installed launcher entries as of the last load: apps installed while Aurora was in the background are noticed by comparing */
@@ -148,28 +125,20 @@ class MainActivity : Activity() {
         bg = AuroraView(this)
         bg.setColors(Themes.ALL[store.theme].colors)
         bg.animated = store.animated
+        bg.showGrid = false
         rootView.addView(bg, ViewGroup.LayoutParams(-1, -1))
         viz = VisualizerView(this)
         rootView.addView(viz, ViewGroup.LayoutParams(-1, -1))
-        buildBackdrop()
-
-        scroll = ScrollView(this).apply {
-            isVerticalScrollBarEnabled = false
-            overScrollMode = View.OVER_SCROLL_NEVER
-            isFillViewport = true
-            clipChildren = false
-            clipToPadding = false
-        }
-        content = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            clipChildren = false
-            clipToPadding = false
-            setPadding(0, 0, 0, u(34))
-        }
-        scroll.addView(content, ViewGroup.LayoutParams(-1, -1))
-        rootView.addView(scroll, ViewGroup.LayoutParams(-1, -1))
-        host = FrameLayout(this).apply { clipChildren = false; visibility = View.GONE }
+        host = FrameLayout(this).apply { clipChildren = false }
         rootView.addView(host, ViewGroup.LayoutParams(-1, -1))
+        dim = View(this).apply {
+            setBackgroundColor(Color.argb(NIGHT_VEIL, 0, 0, 0))
+            alpha = 0f
+            isFocusable = false
+            isClickable = false
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }
+        rootView.addView(dim, ViewGroup.LayoutParams(-1, -1))
         setContentView(rootView)
 
         window.decorView.systemUiVisibility = (View.SYSTEM_UI_FLAG_LAYOUT_STABLE
@@ -216,13 +185,14 @@ class MainActivity : Activity() {
         handler.postDelayed(saverTick, 10_000)
         viz.start()
         updateClock()
+        updateNight(false)
         updateWeather()
         refreshWeather(false)
         loadFeed()
         if (dirty) reload(null)
         else if (apps.isNotEmpty() && panel == null && launcherSig() != appsSig) reload(null)
         else if (apps.isNotEmpty() && panel == null && renderedRecents != store.recents.joinToString("\n")) {
-            // coming back from an app: show the updated RECENT row
+            // coming back from an app: the order of the apps follows what was used last
             render(null)
         }
     }
@@ -242,12 +212,7 @@ class MainActivity : Activity() {
         if (intent.getBooleanExtra("ambient", false)) { enterAmbient(); return }      // (for testing: am start --ez ambient true)
         if (ambientOn) exitAmbient()
         if (panel != null) closeSettings()
-        if (store.style == 0) {
-            scroll.smoothScrollTo(0, 0)
-            firstTile()?.requestFocus()
-        } else {
-            currentStyle?.refocus()
-        }
+        currentStyle?.home()
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
@@ -262,6 +227,8 @@ class MainActivity : Activity() {
             closeSettings()
             return true
         }
+        // Back closes what the home style has open (a Drift panel)
+        if (keyCode == KeyEvent.KEYCODE_BACK && currentStyle?.onBack() == true) return true
         // as the Home screen, Back has nowhere to go (it would only show Google TV for a moment)
         if (keyCode == KeyEvent.KEYCODE_BACK && store.homeButton && HomeGuardService.isEnabled(this)) return true
         return super.onKeyDown(keyCode, event)
@@ -287,8 +254,12 @@ class MainActivity : Activity() {
     /** while the screensaver runs, the first key press only wakes it */
     override fun dispatchKeyEvent(ev: KeyEvent): Boolean {
         if (ambientOn) {
-            if (ev.action == KeyEvent.ACTION_DOWN) exitAmbient()
+            if (ev.action == KeyEvent.ACTION_DOWN) { brighten(); exitAmbient() }
             return true
+        }
+        if (ev.action == KeyEvent.ACTION_DOWN) {
+            brighten()
+            currentStyle?.onKey()
         }
         return super.dispatchKeyEvent(ev)
     }
@@ -304,8 +275,8 @@ class MainActivity : Activity() {
         if (ambientOn) return
         ambientOn = true
         host.visibility = View.INVISIBLE
-        scroll.visibility = View.INVISIBLE
         bg.visibility = View.INVISIBLE
+        viz.covered = false
         val clock = TextView(this).apply {
             setTextSize(TypedValue.COMPLEX_UNIT_PX, u(34).toFloat())
             typeface = Typeface.create("sans-serif-thin", Typeface.NORMAL)
@@ -321,7 +292,7 @@ class MainActivity : Activity() {
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; addView(clock); addView(track) }
         val v = FrameLayout(this)
         v.addView(col, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.START).apply { setMargins(u(44), 0, 0, u(32)) })
-        rootView.addView(v, ViewGroup.LayoutParams(-1, -1))
+        rootView.addView(v, rootView.indexOfChild(dim), ViewGroup.LayoutParams(-1, -1))      // (under the night veil)
         ambientView = v; ambClock = clock; ambTrack = track
         updateAmbientText()
         handler.removeCallbacks(ambientTick)
@@ -336,8 +307,8 @@ class MainActivity : Activity() {
         viz.ambient = -1
         ambientView?.let { rootView.removeView(it) }
         ambientView = null; ambClock = null; ambTrack = null
-        host.visibility = if (store.style == 0) View.GONE else View.VISIBLE
-        scroll.visibility = if (store.style == 0) View.VISIBLE else View.GONE
+        host.visibility = View.VISIBLE
+        viz.covered = covered
         applyChrome()
         lastInteraction = android.os.SystemClock.elapsedRealtime()
         currentStyle?.refocus()
@@ -446,89 +417,52 @@ class MainActivity : Activity() {
         return all.distinctBy { it.key }.sortedBy { it.label.lowercase(Locale.getDefault()) }
     }
 
-    // ---------------------------------------------------------------- clock, network, weather
-
-    internal fun netLabel(): String {
-        return try {
-            val cm = getSystemService(ConnectivityManager::class.java)
-            val caps = cm.getNetworkCapabilities(cm.activeNetwork)
-            when {
-                caps == null -> "Offline"
-                caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "Ethernet"
-                caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "Wi-Fi"
-                else -> "Online"
-            }
-        } catch (e: Exception) {
-            ""
-        }
-    }
+    // ---------------------------------------------------------------- clock, weather, night dimming
 
     internal fun nowStr(pattern: String): String = SimpleDateFormat(pattern, Locale.getDefault()).format(Date())
     internal fun clockPattern(): String = if (DateFormat.is24HourFormat(this)) "HH:mm" else "h:mm"
 
     private fun updateClock() {
         currentStyle?.onTick()
-        val c = clock ?: return
-        val d = dateView ?: return
-        c.text = nowStr(clockPattern())
-        val date = nowStr("EEEE, d MMMM")
-        val net = netLabel()
-        d.text = if (net.isEmpty()) date else "$date   ·   $net"
+        updateNight(true)
     }
 
-    // ---- weather text pieces, shared by every home style
+    /** Night dimming: inside the night hours a black veil lies over the whole home, scenes included. */
+    private fun updateNight(animate: Boolean) {
+        val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        val on = HomeLogic.isNight(store.nightMode, hour, store.nightFrom, store.nightUntil)
+        if (on == nightOn) return
+        nightOn = on
+        handler.removeCallbacks(dimAgain)
+        dim.animate().cancel()
+        if (animate) dim.animate().alpha(if (on) 1f else 0f).setDuration(1200).start() else dim.alpha = if (on) 1f else 0f
+    }
+
+    /** any key press lifts the veil for a few seconds */
+    private fun brighten() {
+        if (!nightOn) return
+        handler.removeCallbacks(dimAgain)
+        dim.animate().cancel()
+        dim.animate().alpha(0f).setDuration(180).start()
+        handler.postDelayed(dimAgain, NIGHT_BRIGHT_MS)
+    }
+
+    // ---- weather text pieces, shared by the home styles
     private fun wxReady() = store.showWeather && store.wTime != 0L && store.lat.isNotEmpty()
     private fun tf(c: Float): String {
         val f = store.fahrenheit
         return "${(if (f) c * 9f / 5f + 32f else c).roundToInt()}°"
     }
-    internal fun wxMain(): String = when {
-        !store.showWeather -> ""
-        !wxReady() -> weatherError ?: "Loading weather…"
-        else -> "${Weather.emoji(store.wCode, store.wDay)}  ${tf(store.wTemp)}   ${Weather.label(store.wCode)}"
-    }
-    internal fun wxSub(): String =
-        if (wxReady()) "${store.place}    H ${tf(store.wHi)}   L ${tf(store.wLo)}" else ""
-    internal fun wxTemp(): String =
-        if (wxReady()) "${Weather.emoji(store.wCode, store.wDay)} ${tf(store.wTemp)}" else "…"
-    internal fun wxDetail(): String =
-        if (wxReady()) "H ${tf(store.wHi)} · L ${tf(store.wLo)} · ${Weather.label(store.wCode).uppercase(Locale.getDefault())}" else ""
+    /** "15° Place" */
+    internal fun wxShort(): String = if (wxReady()) "${tf(store.wTemp)} ${store.place}".trim() else ""
+    /** "15°  clear" */
+    internal fun wxNow(): String =
+        if (wxReady()) "${tf(store.wTemp)}  ${Weather.label(store.wCode).lowercase(Locale.getDefault())}" else ""
+    internal fun wxPlace(): String = if (wxReady()) store.place else ""
 
     private fun updateWeather() {
         currentStyle?.onWeather()
-        val w1 = weatherMain ?: return
-        val w2 = weatherSub ?: return
-        if (!store.showWeather) {
-            w1.visibility = View.GONE
-            w2.visibility = View.GONE
-            return
-        }
-        w1.visibility = View.VISIBLE
-        w2.visibility = View.VISIBLE
-        w1.text = wxMain()
-        w2.text = wxSub()
     }
-
-    // ---- system facts for the Command HUD
-    internal fun ipAddress(): String = try {
-        val cm = getSystemService(ConnectivityManager::class.java)
-        cm.getLinkProperties(cm.activeNetwork)?.linkAddresses
-            ?.map { it.address }
-            ?.firstOrNull { it is java.net.Inet4Address && !it.isLoopbackAddress }
-            ?.hostAddress ?: ""
-    } catch (e: Exception) { "" }
-
-    internal fun storageFree(): String = try {
-        val st = android.os.StatFs(android.os.Environment.getDataDirectory().path)
-        "${(st.availableBytes / 1_000_000_000L)} GB"
-    } catch (e: Exception) { "—" }
-
-    internal fun ramUsedPct(): Int = try {
-        val am = getSystemService(android.app.ActivityManager::class.java)
-        val mi = android.app.ActivityManager.MemoryInfo()
-        am.getMemoryInfo(mi)
-        (100 - mi.availMem * 100 / mi.totalMem).toInt().coerceIn(0, 100)
-    } catch (e: Exception) { 0 }
 
     // ---- opening things
     internal fun openApp(e: AppEntry) {
@@ -538,9 +472,6 @@ class MainActivity : Activity() {
             Toast.makeText(this, "Can't open ${e.label}", Toast.LENGTH_SHORT).show()
         }
     }
-
-    /** Play opens the item in its app (background playback from the home screen was tried and removed). */
-    internal fun playItem(item: TvFeed.Item, fallback: AppEntry?) = openItem(item, fallback)
 
     /** Opens the exact title when the app gave a deep link, otherwise just the app. */
     internal fun openItem(item: TvFeed.Item, fallback: AppEntry?) {
@@ -616,65 +547,7 @@ class MainActivity : Activity() {
         }
     }
 
-    // ---------------------------------------------------------------- main screen
-
-    private fun header(): View {
-        val box = FrameLayout(this).apply { setPadding(u(44), u(30), u(44), u(10)) }
-
-        val left = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        clock = TextView(this).apply {
-            setTextSize(TypedValue.COMPLEX_UNIT_PX, u(58).toFloat())
-            setTextColor(Color.WHITE)
-            typeface = Typeface.create("sans-serif-thin", Typeface.NORMAL)
-            includeFontPadding = false
-        }
-        dateView = TextView(this).apply {
-            setTextSize(TypedValue.COMPLEX_UNIT_PX, u(14).toFloat())
-            setTextColor(Color.argb(170, 255, 255, 255))
-            typeface = Typeface.create("sans-serif", Typeface.NORMAL)
-            letterSpacing = 0.06f
-            setPadding(u(3), u(4), 0, 0)
-        }
-        left.addView(clock)
-        left.addView(dateView)
-        box.addView(left, FrameLayout.LayoutParams(-2, -2, Gravity.START or Gravity.TOP))
-
-        val right = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.END
-        }
-        weatherMain = TextView(this).apply {
-            setTextSize(TypedValue.COMPLEX_UNIT_PX, u(24).toFloat())
-            setTextColor(Color.WHITE)
-            typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
-            gravity = Gravity.END
-        }
-        weatherSub = TextView(this).apply {
-            setTextSize(TypedValue.COMPLEX_UNIT_PX, u(12).toFloat())
-            setTextColor(Color.argb(160, 255, 255, 255))
-            letterSpacing = 0.05f
-            gravity = Gravity.END
-            setPadding(0, u(2), 0, u(8))
-        }
-        right.addView(weatherMain)
-        right.addView(weatherSub)
-
-        val pills = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.END
-            clipChildren = false
-        }
-        val gap = LinearLayout.LayoutParams(-2, -2).apply { setMargins(u(6), 0, 0, 0) }
-        pills.addView(pill("Customize") { openSettings() }, gap)
-        pills.addView(pill("Wi-Fi") { launch(Intent(Settings.ACTION_WIFI_SETTINGS)) }, gap)
-        pills.addView(pill("Settings") { launch(Intent(Settings.ACTION_SETTINGS)) }, gap)
-        right.addView(pills)
-        box.addView(right, FrameLayout.LayoutParams(-2, -2, Gravity.END or Gravity.TOP))
-
-        updateClock()
-        updateWeather()
-        return box
-    }
+    // ---------------------------------------------------------------- the home screen
 
     /** Favorites first, then recents, then everything else; one list for the non-Classic styles. */
     private fun orderedApps(): List<AppEntry> {
@@ -688,323 +561,105 @@ class MainActivity : Activity() {
         return out.values.toList()
     }
 
+    /** the user's app for a package (the first of its entries, in the user's order) */
+    internal fun appFor(pkg: String): AppEntry? = appByPkg[pkg]
+
+    private fun pkgOrder(): List<String> = appByPkg.keys.toList()
+
+    /** every lane of the home: across all apps, the pinned titles, one per app (see HomeLogic.lanes) */
+    internal fun lanes(): List<HomeLogic.Lane> = HomeLogic.lanes(feed, pkgOrder(), { appByPkg[it]?.label }, store.pins)
+
+    /** the shelves of the music apps: playlists, albums, artists */
+    internal fun musicLanes(): List<HomeLogic.Lane> = HomeLogic.musicLanes(feed, pkgOrder()) { appByPkg[it]?.label }
+
+    /** the pinned titles as one lane, or null when nothing is pinned */
+    internal fun pinLane(): HomeLogic.Lane? {
+        val pins = store.pins.filter { appByPkg.containsKey(it.pkg) }
+        return if (pins.isEmpty()) null else HomeLogic.Lane(HomeLogic.TITLE_PINNED, pins.map { it.toItem() }, true)
+    }
+
+    /** may the home take the focus now? (not while Customize or the screensaver is up) */
+    internal fun homeMayFocus(): Boolean = panel == null && !ambientOn
+
+    /** A full-screen picture covers the scene and the theme's colours: they stop drawing until it goes away. */
+    internal fun setBackdropCovers(on: Boolean) {
+        if (covered == on) return
+        covered = on
+        if (ambientOn) return
+        viz.covered = on
+        bg.visibility = if (on) View.INVISIBLE else View.VISIBLE
+    }
+
     private fun applyChrome() {
         bg.setColors(Themes.ALL[store.theme].colors)
-        // Command draws its own background
-        bg.visibility = if (store.style == 3) View.INVISIBLE else View.VISIBLE
-        bg.showGrid = store.style != 2
+        bg.visibility = if (covered) View.INVISIBLE else View.VISIBLE
     }
 
-    private fun render(focusId: String?) {
-        if (store.style == 0) renderClassic(focusId) else renderStyle(focusId)
-    }
-
-    private fun renderStyle(focusId: String?) {
-        val key = focusId?.substringAfter(':') ?: currentStyle?.currentKey() ?: lastKey
+    /** Builds the home screen in the chosen style. [focusKey] is the app that should hold the focus afterwards, if any. */
+    private fun render(focusKey: String?) {
+        val key = focusKey ?: currentStyle?.currentKey()
         renderedRecents = store.recents.joinToString("\n")
-        tiles.clear()
-        hideBackdrop()                       // the Classic watch-next backdrop is not used here
         currentStyle?.destroy()
-        scroll.visibility = View.GONE
-        host.visibility = View.VISIBLE
         host.removeAllViews()
+        val ordered = orderedApps()
+        val byPkg = LinkedHashMap<String, AppEntry>()
+        for (e in ordered) byPkg.putIfAbsent(e.pkg, e)
+        appByPkg = byPkg
         applyChrome()
-        val st: HomeStyle = when (store.style) {
-            1 -> CinemaStyle(this)
-            2 -> HorizonStyle(this)
-            else -> CommandStyle(this)
-        }
+        val st: HomeStyle = if (store.style == HomeLogic.DRIFT) DriftStyle(this) else MarqueeStyle(this)
         currentStyle = st
         host.addView(st.view, ViewGroup.LayoutParams(-1, -1))
-        st.bind(orderedApps(), key)
-        if (store.style == 3) bg.visibility = View.INVISIBLE
-        if (panel == null) st.refocus()
+        st.bind(ordered, key)
+        if (homeMayFocus()) st.refocus()
     }
 
     private fun refocusHome() {
-        if (store.style == 0) firstTile()?.requestFocus() else currentStyle?.refocus()
+        currentStyle?.refocus()
     }
 
-    private fun renderClassic(focusId: String?) {
-        currentStyle?.destroy()
-        currentStyle = null
-        host.removeAllViews()
-        host.visibility = View.GONE
-        scroll.visibility = View.VISIBLE
-        applyChrome()
-        tiles.clear()
-        renderedRecents = store.recents.joinToString("\n")
-        content.removeAllViews()
-        content.addView(header())
-        // spacer pushes the rows to the lower part of the screen (clock stays top-left)
-        content.addView(View(this), LinearLayout.LayoutParams(-1, 0, 1f))
-
-        val hidden = store.hidden.toSet()
-        val visible = apps.filter { it.key !in hidden }
-        val byKey = visible.associateBy { it.key }
-        val favs = store.favs.mapNotNull { byKey[it] }
-        var index = 0
-        if (favs.isNotEmpty()) content.addView(section("FAVORITES", "fav", favs, index++))
-        if (store.showRecent) {
-            val rec = store.recents.mapNotNull { byKey[it] }
-            if (rec.isNotEmpty()) content.addView(section("RECENT", "rec", rec, index++))
-        }
-        content.addView(section("ALL APPS", "all", visible, index))
-
-        if (panel == null) {
-            val target = (focusId?.let { tiles[it] }) ?: firstTile()
-            target?.post { target.requestFocus() }
-        }
-    }
-
-    private fun firstTile(): View? =
-        tiles.entries.firstOrNull { it.key.startsWith("fav:") }?.value
-            ?: tiles.entries.firstOrNull { it.key.startsWith("all:") }?.value
-
-    private fun section(title: String, id: String, list: List<AppEntry>, index: Int): View {
-        val wrap = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            clipChildren = false
-            clipToPadding = false
-        }
-        wrap.addView(TextView(this).apply {
-            text = title
-            setTextSize(TypedValue.COMPLEX_UNIT_PX, u(11).toFloat())
-            setTextColor(accent)
-            alpha = 0.85f
-            letterSpacing = 0.3f
-            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-            setPadding(u(48), u(14), 0, u(2))
-        })
-
-        val hsv = HorizontalScrollView(this).apply {
-            isHorizontalScrollBarEnabled = false
-            overScrollMode = View.OVER_SCROLL_NEVER
-            clipChildren = false
-            clipToPadding = false
-        }
-        val car = store.carousel
-        val row = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            clipChildren = false
-            clipToPadding = false
-            // carousel: side padding lets the first and last tile reach the centre of the screen
-            val side = if (car) (resources.displayMetrics.widthPixels - cellWidth()) / 2 else u(36)
-            setPadding(side, if (car) u(26) else u(6), side, if (car) u(16) else u(2))
-        }
-        val favSet = store.favs.toSet()
-        for (e in list) {
-            val t = tile(e, id, index, wrap, hsv, e.key in favSet)
-            tiles["$id:${e.key}"] = t
-            row.addView(t)
-        }
-        hsv.addView(row, ViewGroup.LayoutParams(-2, -2))
-        wrap.addView(hsv, ViewGroup.LayoutParams(-1, -2))
-        if (car) {
-            hsv.setOnScrollChangeListener { _, _, _, _, _ -> applyCarousel(hsv, row) }
-            hsv.post { applyCarousel(hsv, row) }
-        }
-        return wrap
-    }
-
-    private fun tileScale(): Float = floatArrayOf(0.85f, 1f, 1.2f)[store.tileSize]
-
-    /** Icons-only tiles are square; banner tiles are wide (16:9). */
-    private fun cardWidth(): Int = if (store.iconsOnly) u(92f * tileScale()) else u(152f * tileScale())
-    private fun cardHeight(): Int = if (store.iconsOnly) u(92f * tileScale()) else u(86f * tileScale())
-
-    /** Width of one tile cell including its padding and margins. */
-    private fun cellWidth(): Int = cardWidth() + u(18) + u(4)
-
-    /**
-     * Coverflow: tiles are scaled, faded, tilted and pulled together according to how far
-     * they are from the centre of the row. Runs on every scroll frame, so it animates for free.
-     */
-    private fun applyCarousel(hsv: HorizontalScrollView, row: LinearLayout) {
-        val w = hsv.width
-        if (w == 0) return
-        val center = hsv.scrollX + w / 2f
-        val cw = cellWidth().toFloat()
-        val lift = u(3).toFloat()
-        for (i in 0 until row.childCount) {
-            val c = row.getChildAt(i)
-            val d = ((c.left + c.width / 2f) - center) / cw          // signed distance in tiles
-            val a = minOf(abs(d), 3f)
-            val s = maxOf(0.62f, 1.12f - 0.2f * a)
-            c.scaleX = s
-            c.scaleY = s
-            c.alpha = maxOf(0.3f, 1f - 0.3f * a)
-            c.rotationY = -d.coerceIn(-1.6f, 1.6f) * 26f
-            c.translationX = -d.coerceIn(-2f, 2f) * cw * 0.16f
-            c.translationZ = (3f - a) * lift
-        }
-    }
-
-    private fun tile(
-        e: AppEntry, sectionId: String, sectionIndex: Int,
-        sectionView: View, hsv: HorizontalScrollView, pinned: Boolean
-    ): View {
-        val scale = tileScale()
-        val car = store.carousel
-        val cardW = cardWidth()
-        val cardH = cardHeight()
-        val icons = store.iconsOnly
-        val r = u(12)
-
-        val card = FrameLayout(this).apply {
-            if (!icons) {
-                background = rounded(Color.argb(40, 255, 255, 255), r)
-                foreground = rounded(Color.TRANSPARENT, r, u(1), Color.argb(36, 255, 255, 255))
-                clipToOutline = true
-            }
-        }
-        if (icons) {
-            // icons only: just the app icon - no tile background, no banner art, no text
-            val pad = (cardW * 0.06f).toInt()
-            card.addView(ImageView(this).apply {
-                setImageDrawable(e.icon)
-                scaleType = ImageView.ScaleType.FIT_CENTER
-            }, FrameLayout.LayoutParams(-1, -1).also { it.setMargins(pad, pad, pad, pad) })
-        } else if (e.banner != null) {
-            card.addView(ImageView(this).apply {
-                setImageDrawable(e.banner)
-                scaleType = ImageView.ScaleType.CENTER_CROP
-            }, FrameLayout.LayoutParams(-1, -1))
-        } else {
-            val inner = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                gravity = Gravity.CENTER
-                setPadding(u(8), 0, u(8), 0)
-            }
-            inner.addView(ImageView(this).apply { setImageDrawable(e.icon) }, LinearLayout.LayoutParams(u(46), u(46)))
-            inner.addView(TextView(this).apply {
-                text = e.label
-                setTextSize(TypedValue.COMPLEX_UNIT_PX, u(12).toFloat())
-                setTextColor(Color.argb(225, 255, 255, 255))
-                gravity = Gravity.CENTER
-                maxLines = 1
-                ellipsize = TextUtils.TruncateAt.END
-                setPadding(0, u(6), 0, 0)
-            }, LinearLayout.LayoutParams(-1, -2))
-            card.addView(inner, FrameLayout.LayoutParams(-1, -1))
-        }
-        if (pinned && sectionId != "fav") {
-            val dot = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
-                setColor(accent)
-            }
-            card.addView(View(this).apply { background = dot },
-                FrameLayout.LayoutParams(u(7), u(7), Gravity.END or Gravity.TOP).also {
-                    it.setMargins(0, u(7), u(7), 0)
-                })
-        }
-
-        val label = TextView(this).apply {
-            text = e.label
-            setTextSize(TypedValue.COMPLEX_UNIT_PX, u(12).toFloat())
-            setTextColor(Color.WHITE)
-            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-            gravity = Gravity.CENTER
-            maxLines = 1
-            ellipsize = TextUtils.TruncateAt.END
-            alpha = 0f
-            setPadding(0, u(7), 0, 0)
-        }
-
-        val cell = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_HORIZONTAL
-            isFocusable = true
-            isClickable = true
-            clipChildren = false
-            setPadding(u(9), u(9), u(9), u(5))
-            layoutParams = LinearLayout.LayoutParams(-2, -2).also { it.setMargins(u(2), 0, u(2), 0) }
-            tag = e.key
-            if (car) cameraDistance = resources.displayMetrics.density * 9000f   // soft perspective
-        }
-        cell.addView(card, LinearLayout.LayoutParams(cardW, cardH))
-        cell.addView(label, LinearLayout.LayoutParams(cardW, -2))
-
-        cell.setOnClickListener { openApp(e) }
-        cell.setOnLongClickListener { showAppMenu(e, sectionId); true }
-        cell.setOnFocusChangeListener { v, has ->
-            if (!car) {   // in the carousel, scale and depth come from the scroll position instead
-                v.animate().scaleX(if (has) 1.1f else 1f).scaleY(if (has) 1.1f else 1f).setDuration(140).start()
-                v.translationZ = if (has) u(8).toFloat() else 0f
-            }
-            if (icons) {
-                // no square anywhere: a soft round glow in the accent colour fades in behind the icon
-                v.background = if (has) {
-                    GradientDrawable().apply {
-                        gradientType = GradientDrawable.RADIAL_GRADIENT
-                        // radius = half the tile width, so the glow fades out before it reaches the
-                        // tile's edges (otherwise the edges cut it into a visible rectangle)
-                        gradientRadius = (cardW + u(18)) / 2f
-                        setGradientCenter(0.5f, (u(9) + cardH / 2f) / (u(9) + cardH + u(30)))
-                        colors = intArrayOf(
-                            Color.argb(150, Color.red(accent), Color.green(accent), Color.blue(accent)),
-                            Color.argb(0, Color.red(accent), Color.green(accent), Color.blue(accent))
-                        )
-                    }
-                } else null
-            } else {
-                v.background = if (has) rounded(Color.argb(38, Color.red(accent), Color.green(accent), Color.blue(accent)), u(18)) else null
-                card.background = rounded(Color.argb(if (has) 78 else 40, 255, 255, 255), r)
-                card.foreground = if (has) rounded(Color.TRANSPARENT, r, u(3), accent)
-                else rounded(Color.TRANSPARENT, r, u(1), Color.argb(36, 255, 255, 255))
-            }
-            label.animate().alpha(if (has) 1f else 0f).setDuration(140).start()
-            if (has) onTileFocused(e)
-            if (has) {
-                hsv.smoothScrollTo(maxOf(0, v.left + v.width / 2 - hsv.width / 2), 0)
-                if (sectionIndex > 0) scroll.smoothScrollTo(0, maxOf(0, sectionView.top - u(110)))
-                else scroll.smoothScrollTo(0, 0)
-            }
-        }
-        return cell
-    }
-
-    // ---------------------------------------------------------------- app options (hold OK)
+    // ---------------------------------------------------------------- options (hold OK)
 
     private fun dialogBuilder(): AlertDialog.Builder =
         AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
             .setOnDismissListener { focusPanel?.invoke() }
 
-    internal fun showAppMenu(e: AppEntry, sectionId: String) {
+    /** Options of an app. Pinned apps come first everywhere and are the apps of Drift's pins panel. */
+    internal fun showAppMenu(e: AppEntry) {
         val favs = store.favs
         val idx = favs.indexOf(e.key)
         val labels = ArrayList<String>()
         val acts = ArrayList<() -> Unit>()
 
         if (idx >= 0) {
-            labels += "Unpin from favorites"
+            labels += "Unpin"
             acts += {
                 store.favs = favs - e.key
-                render("all:${e.key}")
+                render(e.key)
             }
             if (idx > 0) {
-                labels += "Move left"
+                labels += "Move earlier"
                 acts += {
                     val l = favs.toMutableList()
                     l[idx] = l[idx - 1]; l[idx - 1] = e.key
                     store.favs = l
-                    render("fav:${e.key}")
+                    render(e.key)
                 }
             }
             if (idx < favs.size - 1) {
-                labels += "Move right"
+                labels += "Move later"
                 acts += {
                     val l = favs.toMutableList()
                     l[idx] = l[idx + 1]; l[idx + 1] = e.key
                     store.favs = l
-                    render("fav:${e.key}")
+                    render(e.key)
                 }
             }
         } else {
-            labels += "Pin to favorites"
+            labels += "Pin"
             acts += {
                 store.favs = favs + e.key
-                render("$sectionId:${e.key}")
+                Toast.makeText(this, "${e.label} pinned: it now comes first", Toast.LENGTH_SHORT).show()
+                render(e.key)
             }
         }
         labels += "Hide from launcher"
@@ -1028,6 +683,32 @@ class MainActivity : Activity() {
             .show()
     }
 
+    /** Options of a title in a lane: pin it (it then has its own lane, and sits in Drift's pins panel) or unpin it. */
+    internal fun showItemMenu(item: TvFeed.Item) {
+        val pin = HomeLogic.pinOf(item)
+        val pins = store.pins
+        val pinned = HomeLogic.isPinned(pins, pin.id)
+        val app = appFor(item.pkg)
+        val labels = ArrayList<String>()
+        val acts = ArrayList<() -> Unit>()
+        labels += if (pinned) "Unpin" else "Pin"
+        acts += {
+            store.pins = HomeLogic.togglePin(pins, pin)
+            Toast.makeText(this, if (pinned) "Unpinned" else "Pinned", Toast.LENGTH_SHORT).show()
+            currentStyle?.onFeed()
+        }
+        labels += "Play"
+        acts += { openItem(item, app) }
+        if (app != null) {
+            labels += "Open ${app.label}"
+            acts += { openApp(app) }
+        }
+        dialogBuilder()
+            .setTitle(item.title)
+            .setItems(labels.toTypedArray()) { _, i -> acts[i]() }
+            .show()
+    }
+
     // ---------------------------------------------------------------- customize panel (MENU)
 
     private fun applyTheme() {
@@ -1039,16 +720,9 @@ class MainActivity : Activity() {
 
     private fun onOff(b: Boolean) = if (b) "On" else "Off"
 
-    /** The on-screen way into Customize for remotes that have no MENU key. */
-    internal fun customizeButton(): TextView = pill("\u2699  Customize") { if (panel == null) openSettings() else closeSettings() }.apply {
-        // nothing is above it: swallow UP so focus can't fall off the screen
-        setOnKeyListener { _, k, e -> k == KeyEvent.KEYCODE_DPAD_UP && e.action == KeyEvent.ACTION_DOWN }
-    }
-
     /** the visualiser appeared or went away: styles that paint their own backdrop adapt */
     internal fun onVisualizerChanged() {
         currentStyle?.onFeed()
-        currentStyle?.onWeather()      // (Command repaints on this)
     }
 
     private fun vizLabel(): String = when {
@@ -1074,13 +748,14 @@ class MainActivity : Activity() {
     internal fun openSettings() {
         if (panel != null) return
         val sizes = arrayOf("Small", "Medium", "Large")
-        val styleNames = arrayOf("Cinema", "Horizon", "Command")
+        val nightNames = arrayOf("Off", "Auto (23:00 to 07:00)", "Custom hours")
+        fun hour(h: Int) = String.format(Locale.US, "%02d:00", h)
         val saverNames = arrayOf("Off", "2 min", "5 min", "10 min", "20 min")
         val saverScenes = intArrayOf(12, 11, 9, 10, 8, 7, -1)             // Interstellar, Blade Runner, Tron, Matrix, Cyberpunk, Desert, Rotate
         val rotNames = arrayOf("Off", "Every track", "Every 5 min", "Every 15 min")
         val rows = listOf(
-            Row("Home style", { styleNames[store.style - 1] }) { d ->
-                store.style = (store.style - 1 + d + 3) % 3 + 1
+            Row("Home style", { HomeLogic.STYLE_NAMES[store.style - 1] }) {
+                store.style = if (store.style == HomeLogic.MARQUEE) HomeLogic.DRIFT else HomeLogic.MARQUEE
                 render(null)
             },
             Row("Theme", { Themes.ALL[store.theme].name }) { d ->
@@ -1108,6 +783,18 @@ class MainActivity : Activity() {
                 val i = saverScenes.indexOf(store.saverMode).coerceAtLeast(0)
                 store.saverMode = saverScenes[(i + d + saverScenes.size) % saverScenes.size]
             },
+            Row("Night dimming", { nightNames[store.nightMode] }) { d ->
+                store.nightMode = (store.nightMode + d + 3) % 3
+                updateNight(true)
+            },
+            Row("Dim from", { hour(store.nightFrom) }, { store.nightMode == HomeLogic.NIGHT_CUSTOM }) { d ->
+                store.nightFrom = (store.nightFrom + d + 24) % 24
+                updateNight(true)
+            },
+            Row("Dim until", { hour(store.nightUntil) }, { store.nightMode == HomeLogic.NIGHT_CUSTOM }) { d ->
+                store.nightUntil = (store.nightUntil + d + 24) % 24
+                updateNight(true)
+            },
             Row("Animated background", { onOff(store.animated) }) {
                 store.animated = !store.animated
                 bg.animated = store.animated
@@ -1122,22 +809,22 @@ class MainActivity : Activity() {
                 store.fahrenheit = !store.fahrenheit
                 updateWeather()
             },
-            Row("Watch-next backdrop", { if (!TvFeed.allowed(this)) "Not allowed yet" else onOff(store.preview) }) {
+            Row("Titles from your apps", { if (!TvFeed.allowed(this)) "Not allowed yet" else onOff(store.preview) }) {
                 if (!TvFeed.allowed(this)) {
                     // READ_TV_LISTINGS can't be granted from a prompt on the TV, only with adb
-                    Toast.makeText(this, "Needs a one-time adb grant: ask your assistant to run it", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, "Needs a one-time adb grant: the README has the command", Toast.LENGTH_LONG).show()
                 } else {
                     store.preview = !store.preview
-                    if (!store.preview) hideBackdrop() else loadFeed()
+                    loadFeed()
                 }
             },
-            Row("Recent apps row", { onOff(store.showRecent) }) {
+            Row("Recently used apps first", { onOff(store.showRecent) }) {
                 store.showRecent = !store.showRecent
                 render(null)
             },
             Row("Home button opens Aurora", { homeLabel() }) {
                 if (!HomeGuardService.canSwitch(this) && !HomeGuardService.isEnabled(this)) {
-                    Toast.makeText(this, "Needs a one-time adb grant: ask your assistant to run it", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, "Needs a one-time adb grant: the README has the command", Toast.LENGTH_LONG).show()
                 } else {
                     store.homeButton = !store.homeButton
                     syncHomeGuard()
@@ -1169,7 +856,12 @@ class MainActivity : Activity() {
         })
 
         val valueViews = ArrayList<Pair<Row, TextView>>()
-        fun refresh() { for ((r, v) in valueViews) v.text = "‹  ${r.value()}  ›" }
+        fun refresh() {
+            for ((r, v) in valueViews) {
+                v.text = "‹  ${r.value()}  ›"
+                (v.parent as View).visibility = if (r.shown()) View.VISIBLE else View.GONE
+            }
+        }
         refreshPanel = { refresh() }
         focusPanel = { (panelRow ?: col.getChildAt(1))?.requestFocus() }
 
@@ -1221,12 +913,14 @@ class MainActivity : Activity() {
         })
         refresh()
 
-        p.addView(col, FrameLayout.LayoutParams(u(400), -2, Gravity.END or Gravity.CENTER_VERTICAL).apply {
-            setMargins(0, 0, u(30), 0)
+        // the list scrolls when it is taller than the screen
+        val sheet = ScrollView(this).apply { isVerticalScrollBarEnabled = false; overScrollMode = View.OVER_SCROLL_NEVER }
+        sheet.addView(col, ViewGroup.LayoutParams(-1, -2))
+        p.addView(sheet, FrameLayout.LayoutParams(u(400), -2, Gravity.END or Gravity.CENTER_VERTICAL).apply {
+            setMargins(0, u(12), u(30), u(12))
         })
-        rootView.addView(p, ViewGroup.LayoutParams(-1, -1))
+        rootView.addView(p, rootView.indexOfChild(dim), ViewGroup.LayoutParams(-1, -1))      // (under the night veil)
         panel = p
-        scroll.descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
         host.descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
         first?.requestFocus()
     }
@@ -1237,7 +931,6 @@ class MainActivity : Activity() {
         refreshPanel = null
         focusPanel = null
         panelRow = null
-        scroll.descendantFocusability = ViewGroup.FOCUS_AFTER_DESCENDANTS
         host.descendantFocusability = ViewGroup.FOCUS_AFTER_DESCENDANTS
         refocusHome()
     }
@@ -1293,70 +986,12 @@ class MainActivity : Activity() {
             .show()
     }
 
-    // ---------------------------------------------------------------- "what to watch next" backdrop
-
-    private fun buildBackdrop() {
-        backdrop = ImageView(this).apply {
-            scaleType = ImageView.ScaleType.CENTER_CROP
-            alpha = 0f
-            visibility = View.GONE
-        }
-        rootView.addView(backdrop, ViewGroup.LayoutParams(-1, -1))
-
-        // darkening: strong on the left (text) and at the bottom (app rows), clear top-right
-        val left = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
-            intArrayOf(Color.argb(225, 0, 0, 0), Color.argb(120, 0, 0, 0), Color.argb(30, 0, 0, 0)))
-        val bottom = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP,
-            intArrayOf(Color.argb(235, 0, 0, 0), Color.argb(150, 0, 0, 0), Color.argb(0, 0, 0, 0)))
-        val scrim = View(this).apply {
-            background = LayerDrawable(arrayOf(left, bottom))
-            alpha = 0f
-            visibility = View.GONE
-            tag = "scrim"
-        }
-        rootView.addView(scrim, ViewGroup.LayoutParams(-1, -1))
-
-        infoKind = TextView(this).apply {
-            setTextSize(TypedValue.COMPLEX_UNIT_PX, u(11).toFloat())
-            setTextColor(accent)
-            letterSpacing = 0.3f
-            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-        }
-        infoTitle = TextView(this).apply {
-            setTextSize(TypedValue.COMPLEX_UNIT_PX, u(34).toFloat())
-            setTextColor(Color.WHITE)
-            typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
-            maxLines = 2
-            ellipsize = TextUtils.TruncateAt.END
-            setPadding(0, u(4), 0, u(4))
-        }
-        infoDesc = TextView(this).apply {
-            setTextSize(TypedValue.COMPLEX_UNIT_PX, u(14).toFloat())
-            setTextColor(Color.argb(210, 255, 255, 255))
-            maxLines = 3
-            ellipsize = TextUtils.TruncateAt.END
-            setLineSpacing(u(2).toFloat(), 1f)
-        }
-        backdropInfo = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            alpha = 0f
-            visibility = View.GONE
-            addView(infoKind)
-            addView(infoTitle)
-            addView(infoDesc)
-        }
-        rootView.addView(backdropInfo, FrameLayout.LayoutParams(
-            (resources.displayMetrics.widthPixels * 0.52f).toInt(), -2, Gravity.TOP or Gravity.START
-        ).apply { setMargins(u(48), u(150), 0, 0) })
-
-        // (added before the scroll view, so the rows and header stay on top of it)
-    }
-
-    private fun scrimView(): View? = rootView.findViewWithTag("scrim")
+    // ---------------------------------------------------------------- what the apps publish
 
     private fun loadFeed() {
         if (!store.preview || !TvFeed.allowed(this)) {
             feed = emptyMap()
+            currentStyle?.onFeed()
             return
         }
         Thread {
@@ -1364,94 +999,11 @@ class MainActivity : Activity() {
             runOnUiThread {
                 if (isDestroyed) return@runOnUiThread
                 feed = f
-                android.util.Log.i("AuroraFeed", "apps with watch-next content: " +
+                android.util.Log.i("AuroraFeed", "apps with published titles: " +
                         (if (f.isEmpty()) "none" else f.entries.joinToString { "${it.key}=${it.value.size}" }))
-                // refresh what is shown for the currently focused app
                 currentStyle?.onFeed()
-                val cur = currentFocusedEntry()
-                if (cur != null) onTileFocused(cur)
             }
         }.start()
-    }
-
-    private fun currentFocusedEntry(): AppEntry? {
-        val key = (window.currentFocus?.tag as? String) ?: return null
-        return apps.firstOrNull { it.key == key }
-    }
-
-    /** Debounced: moving quickly across the row doesn't load a picture for every tile it passes. */
-    private fun onTileFocused(e: AppEntry) {
-        lastKey = e.key
-        if (store.style != 0) return
-        pendingEntry = e
-        handler.removeCallbacks(showRunnable)
-        handler.postDelayed(showRunnable, 350)
-    }
-
-    private fun showFor(e: AppEntry?) {
-        if (e == null || panel != null) return
-        val items = if (store.preview) feed[e.pkg] else null
-        if (items.isNullOrEmpty()) {
-            hideBackdrop()
-            return
-        }
-        if (shownPkg != e.pkg) {
-            shownPkg = e.pkg
-            shownIndex = 0
-        }
-        handler.removeCallbacks(cycleRunnable)
-        showItem(items[shownIndex.coerceIn(0, items.size - 1)], false)
-        if (items.size > 1) handler.postDelayed(cycleRunnable, 9000)
-    }
-
-    private fun showItem(item: TvFeed.Item, fade: Boolean) {
-        val url = item.art
-        shownUrl = url
-        Images.load(this, url, 1280) { bmp ->
-            if (isDestroyed || shownUrl != url || bmp == null) return@load
-            val scrim = scrimView()
-            // judge the picture by its real size: apps often report the wrong aspect ratio
-            val wide = bmp.width >= bmp.height * 1.25f
-            backdrop.scaleType = if (wide) ImageView.ScaleType.CENTER_CROP else ImageView.ScaleType.FIT_END
-            backdrop.setPadding(0, 0, if (wide) 0 else u(70), 0)
-            infoKind.text = item.kind + "  ·  " + (apps.firstOrNull { it.pkg == item.pkg }?.label?.uppercase(Locale.getDefault()) ?: "")
-            infoKind.setTextColor(accent)
-            infoTitle.text = item.title
-            infoDesc.text = item.desc
-            infoDesc.visibility = if (item.desc.isEmpty()) View.GONE else View.VISIBLE
-
-            val wasHidden = backdrop.visibility != View.VISIBLE || backdrop.alpha < 0.05f
-            backdrop.visibility = View.VISIBLE
-            scrim?.visibility = View.VISIBLE
-            backdropInfo.visibility = View.VISIBLE
-            if (wasHidden || !fade) {
-                backdrop.setImageBitmap(bmp)
-                backdrop.animate().alpha(1f).setDuration(380).start()
-                scrim?.animate()?.alpha(1f)?.setDuration(380)?.start()
-                backdropInfo.animate().alpha(1f).setDuration(380).start()
-            } else {
-                // dissolve from one picture to the next
-                backdrop.animate().alpha(0f).setDuration(220).withEndAction {
-                    backdrop.setImageBitmap(bmp)
-                    backdrop.animate().alpha(1f).setDuration(320).start()
-                }.start()
-            }
-            bg.visibility = View.INVISIBLE   // stop the background animation while it is covered
-        }
-    }
-
-    private fun hideBackdrop() {
-        handler.removeCallbacks(cycleRunnable)
-        shownPkg = null
-        shownUrl = null
-        if (!::backdrop.isInitialized || backdrop.visibility != View.VISIBLE) {
-            bg.visibility = View.VISIBLE
-            return
-        }
-        bg.visibility = View.VISIBLE
-        backdrop.animate().alpha(0f).setDuration(260).withEndAction { backdrop.visibility = View.GONE }.start()
-        scrimView()?.let { v -> v.animate().alpha(0f).setDuration(260).withEndAction { v.visibility = View.GONE }.start() }
-        backdropInfo.animate().alpha(0f).setDuration(200).withEndAction { backdropInfo.visibility = View.GONE }.start()
     }
 
     override fun onRequestPermissionsResult(code: Int, perms: Array<out String>, results: IntArray) {
@@ -1460,5 +1012,12 @@ class MainActivity : Activity() {
             refreshPanel?.invoke()
             loadFeed()
         }
+    }
+
+    private companion object {
+        /** how dark the night veil is: 0..255 (about 40 %) */
+        const val NIGHT_VEIL = 102
+        /** how long a key press keeps the home bright at night */
+        const val NIGHT_BRIGHT_MS = 8000L
     }
 }

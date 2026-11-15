@@ -81,6 +81,14 @@ internal class VisualizerView(private val a: MainActivity) : View(a) {
         android.util.Log.d("AuroraViz", "rotate -> " + MODES[m] + (if (scenes) " (screensaver)" else ""))
     }
 
+    /** a full-screen picture lies over the visualiser: it keeps its state but stops drawing */
+    var covered = false
+        set(v) {
+            if (field == v) return
+            field = v
+            if (!v) { lastFrame = SystemClock.uptimeMillis(); invalidate() }
+        }
+
     /** true while the visualiser is on screen (a mode is chosen, something is playing, capture works) */
     var active = false
         private set
@@ -156,8 +164,10 @@ internal class VisualizerView(private val a: MainActivity) : View(a) {
     private val frame = object : Runnable {
         override fun run() {
             if (!active) return
-            tick()
-            invalidate()
+            if (!covered) {
+                tick()
+                invalidate()
+            }
             h.postDelayed(this, 36)
         }
     }
@@ -354,11 +364,10 @@ internal class VisualizerView(private val a: MainActivity) : View(a) {
     }
 
     override fun onDraw(c: Canvas) {
-        if (!active) return
+        if (!active || covered) return
         val w = width.toFloat()
         val hh = height.toFloat()
         if (w <= 0f) return
-        if (a.store.style == 3) c.drawColor(Color.rgb(3, 6, 11))     // Command has no background view of its own
         val hit = beatHit
         beatHit = false
         when (mode()) {

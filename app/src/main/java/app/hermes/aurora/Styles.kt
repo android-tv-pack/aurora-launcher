@@ -1,31 +1,42 @@
 package app.hermes.aurora
 
+import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.Color
+import android.graphics.Matrix
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
-import android.graphics.drawable.LayerDrawable
 import android.text.TextUtils
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
-import java.util.Locale
-import kotlin.math.abs
 
-/** A complete home-screen layout. The Classic screen lives in MainActivity; the others are subclasses. */
+/** A complete home-screen layout: Marquee or Drift. */
 internal abstract class HomeStyle(protected val a: MainActivity) {
     abstract val view: View
     abstract fun bind(apps: List<AppEntry>, focusKey: String?)
+    /** put the focus back where it was (after Customize, the screensaver, a dialog) */
     abstract fun refocus()
+    /** the Home key was pressed while the home screen is showing: back to its resting state */
+    open fun home() = refocus()
+    /** the app whose entry holds the focus, if any (kept across a rebuild of the screen) */
     abstract fun currentKey(): String?
     open fun onTick() {}
     open fun onWeather() {}
+    /** what the apps publish, the pins or the visualizer changed */
     open fun onFeed() {}
+    /** any key was pressed on the home screen */
+    open fun onKey() {}
+    /** Back: true when the style had something to close */
+    open fun onBack(): Boolean = false
     open fun destroy() {}
 
     protected fun u(n: Float): Int = a.u(n)
@@ -46,224 +57,31 @@ internal abstract class HomeStyle(protected val a: MainActivity) {
             includeFontPadding = false
         }
 
+    /** a title that may be long and in any script: wraps to [lines] lines, then ends at a whole word */
+    protected fun titleLabel(size: Float, lines: Int, color: Int = Color.WHITE, face: String = "sans-serif-medium") =
+        TitleView(a).apply {
+            setTextSize(TypedValue.COMPLEX_UNIT_PX, u(size).toFloat())
+            setTextColor(color)
+            typeface = Typeface.create(face, Typeface.NORMAL)
+            maxLines = lines
+            ellipsize = TextUtils.TruncateAt.END
+        }
+
     protected fun matchParent() = FrameLayout.LayoutParams(-1, -1)
-}
 
-// ======================================================================================
-//  CINEMA: the focused app drives the whole screen; apps shrink to a slim dock.
-// ======================================================================================
-internal class CinemaStyle(a: MainActivity) : HomeStyle(a) {
-
-    private val root = FrameLayout(a)
-    override val view: View get() = root
-
-    private val backdrop = ImageView(a)
-    private val scrim = View(a)
-    private val clock = label(40f, Color.WHITE, "sans-serif-thin")
-    private val date = label(12f, Color.argb(170, 255, 255, 255), "sans-serif", 0.08f)
-    private val wx1 = label(20f, Color.WHITE, "sans-serif-light")
-    private val wx2 = label(11f, Color.argb(160, 255, 255, 255), "sans-serif", 0.05f)
-    private val customize = a.customizeButton()
-
-    private val kicker = label(11f, a.accent, "sans-serif-medium", 0.3f)
-    private val title = label(34f, Color.WHITE, "sans-serif-light").apply {
-        maxLines = 2
-        ellipsize = TextUtils.TruncateAt.END
-    }
-    private val desc = label(13f, Color.argb(210, 255, 255, 255)).apply {
-        maxLines = 2
-        ellipsize = TextUtils.TruncateAt.END
-    }
-    private val track = FrameLayout(a)
-    private val fill = View(a)
-    private val resumeBtn = button(true)
-    private val openBtn = button(false)
-    private val prevBtn = button(false).apply { text = "⏮"; visibility = View.GONE }
-    private val nextBtn = button(false).apply { text = "⏭"; visibility = View.GONE }
-    private val stopBtn = button(false).apply { text = "⏹  Stop"; visibility = View.GONE }
-    private var lastBackdrop: android.graphics.Bitmap? = null
-    private var lastAmbient: android.graphics.Bitmap? = null
-    /** album cover for the now-playing hero, shown as a rounded card on the right */
-    private val cover = ImageView(a)
-
-    private val moreLabel = label(10f, Color.argb(170, 255, 255, 255), "sans-serif-medium", 0.3f)
-    private val cardsRow = LinearLayout(a)
-    private val cardsScroll = HorizontalScrollView(a)
-    private val dockRow = LinearLayout(a)
-    private val dockScroll = HorizontalScrollView(a)
-
-    private val dockCells = ArrayList<View>()
-    private var apps: List<AppEntry> = emptyList()
-    private var current: AppEntry? = null
-    private var startKey: String? = null
-    private var shown: TvFeed.Item? = null
-    private val bindRunnable = Runnable { current?.let { showApp(it) } }
-
-    init {
-        root.clipChildren = false
-        backdrop.scaleType = ImageView.ScaleType.CENTER_CROP
-        backdrop.alpha = 0f
-        backdrop.visibility = View.GONE
-        root.addView(backdrop, matchParent())
-
-        val left = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
-            intArrayOf(Color.argb(230, 0, 0, 0), Color.argb(130, 0, 0, 0), Color.argb(20, 0, 0, 0)))
-        val bottom = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP,
-            intArrayOf(Color.argb(245, 0, 0, 0), Color.argb(170, 0, 0, 0), Color.argb(0, 0, 0, 0)))
-        scrim.background = LayerDrawable(arrayOf(left, bottom))
-        scrim.alpha = 0f
-        scrim.visibility = View.GONE
-        root.addView(scrim, matchParent())
-
-        cover.scaleType = ImageView.ScaleType.CENTER_CROP
-        cover.background = rounded(Color.argb(40, 255, 255, 255), u(16))
-        cover.outlineProvider = android.view.ViewOutlineProvider.BACKGROUND
-        cover.clipToOutline = true
-        cover.elevation = u(14).toFloat()
-        cover.visibility = View.GONE
-        root.addView(cover, FrameLayout.LayoutParams(u(190), u(190), Gravity.TOP or Gravity.END).apply { setMargins(0, u(122), u(96), 0) })
-
-        // header
-        val head = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL }
-        head.addView(clock)
-        head.addView(date, LinearLayout.LayoutParams(-2, -2).apply { setMargins(u(3), u(2), 0, 0) })
-        root.addView(head, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START).apply {
-            setMargins(u(44), u(26), 0, 0)
-        })
-        val wx = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.END }
-        wx.addView(wx1)
-        wx.addView(wx2, LinearLayout.LayoutParams(-2, -2).apply { setMargins(0, u(3), 0, 0) })
-        wx.addView(customize, LinearLayout.LayoutParams(-2, -2).apply { setMargins(0, u(10), 0, 0) })
-        root.addView(wx, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply {
-            setMargins(0, u(30), u(44), 0)
-        })
-
-        // hero text
-        val hero = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL }
-        hero.addView(kicker)
-        hero.addView(title, LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, u(8), 0, u(6)) })
-        hero.addView(desc)
-        track.setBackgroundColor(Color.argb(60, 255, 255, 255))
-        track.addView(fill, FrameLayout.LayoutParams(0, -1))
-        fill.setBackgroundColor(Color.WHITE)
-        hero.addView(track, LinearLayout.LayoutParams(u(170), maxOf(2, u(3))).apply { setMargins(0, u(14), 0, 0) })
-        val buttons = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL; clipChildren = false }
-        buttons.addView(prevBtn, LinearLayout.LayoutParams(-2, -2).apply { setMargins(0, 0, u(10), 0) })
-        buttons.addView(resumeBtn)
-        buttons.addView(nextBtn, LinearLayout.LayoutParams(-2, -2).apply { setMargins(u(10), 0, 0, 0) })
-        buttons.addView(stopBtn, LinearLayout.LayoutParams(-2, -2).apply { setMargins(u(10), 0, 0, 0) })
-        buttons.addView(openBtn, LinearLayout.LayoutParams(-2, -2).apply { setMargins(u(10), 0, 0, 0) })
-        hero.addView(buttons, LinearLayout.LayoutParams(-2, -2).apply { setMargins(0, u(14), 0, 0) })
-        hero.clipChildren = false
-        root.addView(hero, FrameLayout.LayoutParams(
-            (a.resources.displayMetrics.widthPixels * 0.5f).toInt(), -2, Gravity.TOP or Gravity.START
-        ).apply { setMargins(u(44), u(112), 0, 0) })
-
-        // bottom block: more-from label, cards, dock
-        val bottomBlock = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL; clipChildren = false; clipToPadding = false }
-        moreLabel.setPadding(u(48), 0, 0, u(2))
-        bottomBlock.addView(moreLabel)
-        setupScroll(cardsScroll, cardsRow, u(38))
-        bottomBlock.addView(cardsScroll, LinearLayout.LayoutParams(-1, -2))
-        setupScroll(dockScroll, dockRow, u(38))
-        bottomBlock.addView(dockScroll, LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, u(4), 0, u(22)) })
-        root.addView(bottomBlock, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
-
-        moreLabel.visibility = View.GONE
-        cardsScroll.visibility = View.GONE
-        refreshHeader()
-        NowPlaying.onChange = { current?.let { showApp(it) } }
-    }
-
-    private val npTick = object : Runnable {
-        override fun run() {
-            val np = current?.let { NowPlaying.infoFor(it.pkg) } ?: return
-            setProgress(np.fraction())
-            if (np.playing) a.handler.postDelayed(this, 1000)
-        }
-    }
-
-    private fun setProgress(f: Float) {
-        if (f < 0f) { track.visibility = View.GONE; return }
-        track.visibility = View.VISIBLE
-        (fill.layoutParams as FrameLayout.LayoutParams).width = (u(170) * f).toInt().coerceAtLeast(2)
-        fill.requestLayout()
-    }
-
-    private fun showNowPlaying(e: AppEntry, np: NowPlaying.Info) {
-        shown = null
-        kicker.text = (if (np.playing) "NOW PLAYING" else "PAUSED") + "  ·  " + e.label.uppercase(Locale.getDefault())
-        kicker.setTextColor(a.accent)
-        title.text = np.title
-        desc.text = np.subtitle()
-        desc.visibility = if (desc.text.isEmpty()) View.GONE else View.VISIBLE
-        setProgress(np.fraction())
-        a.handler.removeCallbacks(npTick)
-        if (np.playing) a.handler.postDelayed(npTick, 1000)
-        resumeBtn.text = if (np.playing) "❚❚  Pause" else "▶  Play"
-        resumeBtn.setOnClickListener { NowPlaying.playPause(e.pkg) }
-        prevBtn.visibility = View.VISIBLE
-        nextBtn.visibility = View.VISIBLE
-        stopBtn.visibility = View.VISIBLE
-        stopBtn.setOnClickListener { NowPlaying.stopPlayback(e.pkg) }
-        prevBtn.setOnClickListener { NowPlaying.prev(e.pkg) }
-        nextBtn.setOnClickListener { NowPlaying.next(e.pkg) }
-        openBtn.text = "Open " + e.label
-        openBtn.setOnClickListener { a.openApp(e) }
-        openBtn.visibility = View.VISIBLE
-        val art = np.art
-        if (art != null) {
-            cover.setImageBitmap(art)
-            cover.visibility = View.VISIBLE
-            a.viz.evaluate()
-            // the visualiser replaces the colour wash behind the cover
-            if (a.viz.live) { hideBackdrop(); lastAmbient = null } else setAmbient(art)
-        } else {
-            cover.visibility = View.GONE
-            hideBackdrop()
-        }
-    }
-
-    /** a soft wash of the cover's colours behind everything (the cover shrunk to a few pixels, then stretched) */
-    private fun setAmbient(art: android.graphics.Bitmap) {
-        if (art === lastAmbient && backdrop.visibility == View.VISIBLE) return
-        lastAmbient = art
-        lastBackdrop = null
-        // halve repeatedly: every step averages 2x2 pixels, so details melt into a clean colour wash
-        var tiny = art
-        while (tiny.width > 8) tiny = android.graphics.Bitmap.createScaledBitmap(tiny, tiny.width / 2, tiny.height / 2, true)
-        backdrop.scaleType = ImageView.ScaleType.CENTER_CROP
-        backdrop.setPadding(0, 0, 0, 0)
-        backdrop.setImageBitmap(tiny)
-        backdrop.visibility = View.VISIBLE
-        scrim.visibility = View.VISIBLE
-        backdrop.animate().alpha(0.62f).setDuration(380).start()
-        scrim.animate().alpha(0.55f).setDuration(380).start()
-    }
-
-    private fun setupScroll(s: HorizontalScrollView, row: LinearLayout, side: Int) {
-        s.isHorizontalScrollBarEnabled = false
-        s.overScrollMode = View.OVER_SCROLL_NEVER
-        s.clipChildren = false
-        s.clipToPadding = false
-        row.orientation = LinearLayout.HORIZONTAL
-        row.clipChildren = false
-        row.clipToPadding = false
-        row.setPadding(side, u(8), side, u(8))
-        s.addView(row, ViewGroup.LayoutParams(-2, -2))
-    }
-
-    private fun button(primary: Boolean): TextView = TextView(a).apply {
+    /** a pill button; the primary one is white, the others glass. The focus ring is the theme's accent colour. */
+    protected fun actionButton(primary: Boolean): TextView = TextView(a).apply {
         setTextSize(TypedValue.COMPLEX_UNIT_PX, u(12f).toFloat())
         typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
         setTextColor(if (primary) Color.rgb(6, 18, 26) else Color.WHITE)
         gravity = Gravity.CENTER
+        maxLines = 1
         setPadding(u(18), u(8), u(18), u(8))
         isFocusable = true
         isClickable = true
-        val normal = rounded(if (primary) Color.WHITE else Color.argb(40, 255, 255, 255), u(18),
-            if (primary) 0 else u(1), Color.argb(70, 255, 255, 255))
-        val focus = rounded(if (primary) Color.WHITE else Color.argb(90, 255, 255, 255), u(18), u(3), a.accent)
+        val normal = rounded(if (primary) Color.WHITE else Color.argb(120, 24, 26, 36), u(18),
+            if (primary) 0 else u(1), Color.argb(80, 255, 255, 255))
+        val focus = rounded(if (primary) Color.WHITE else Color.argb(200, 44, 48, 64), u(18), u(3), a.accent)
         background = normal
         setOnFocusChangeListener { v, has ->
             v.background = if (has) focus else normal
@@ -271,476 +89,316 @@ internal class CinemaStyle(a: MainActivity) : HomeStyle(a) {
         }
     }
 
-    // ---------------------------------------------------------------- data
-
-    override fun bind(apps: List<AppEntry>, focusKey: String?) {
-        this.apps = apps
-        startKey = focusKey
-        dockRow.removeAllViews()
-        dockCells.clear()
-        for (e in apps) {
-            val c = dockCell(e)
-            dockCells.add(c)
-            dockRow.addView(c, LinearLayout.LayoutParams(-2, -2).apply { setMargins(u(3), 0, u(3), 0) })
-        }
-        refreshHeader()
-    }
-
-    override fun currentKey(): String? = current?.key ?: startKey
-
-    override fun refocus() {
-        val cell = dockCells.firstOrNull { it.tag == (current?.key ?: startKey) } ?: dockCells.firstOrNull()
-        cell?.post { cell.requestFocus() }
-    }
-
-    override fun onTick() = refreshHeader()
-    override fun onWeather() = refreshHeader()
-    override fun onFeed() { current?.let { showApp(it) } }
-    override fun destroy() { a.handler.removeCallbacks(bindRunnable); a.handler.removeCallbacks(npTick); NowPlaying.onChange = null }
-
-    private fun refreshHeader() {
-        clock.text = a.nowStr(a.clockPattern())
-        date.text = a.nowStr("EEEE, d MMMM")
-        wx1.text = a.wxMain()
-        wx2.text = a.wxSub()
-    }
-
-    // ---------------------------------------------------------------- dock
-
-    private fun dockCell(e: AppEntry): View {
+    /** an app as icon with its name underneath (the name is always shown); OK opens, hold OK = options */
+    protected fun appCell(e: AppEntry, width: Int): View {
         val icon = ImageView(a).apply { setImageDrawable(e.icon) }
-        // Mono / Neon / Glass icons are light or glowing: a white focus plate would swallow them
-        val darkPlate = a.store.iconStyle != 0
-        val name = label(12f, if (darkPlate) Color.WHITE else Color.rgb(6, 18, 26), "sans-serif-medium").apply {
-            text = e.label
-            maxLines = 1
-            ellipsize = TextUtils.TruncateAt.END
-            visibility = View.GONE
-        }
-        val cell = LinearLayout(a).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            isFocusable = true
-            isClickable = true
-            tag = e.key
-            setPadding(u(7), u(6), u(7), u(6))
-            alpha = 0.85f
-        }
-        cell.addView(icon, LinearLayout.LayoutParams(u(30), u(30)))
-        cell.addView(name, LinearLayout.LayoutParams(-2, -2).apply { setMargins(u(9), 0, u(6), 0) })
-        cell.setOnClickListener { a.openApp(e) }
-        cell.setOnLongClickListener { a.showAppMenu(e, "all"); true }
-        cell.setOnFocusChangeListener { v, has ->
-            if (has) {
-                v.background = if (darkPlate) rounded(Color.argb(205, 14, 18, 30), u(16), u(3), a.accent)
-                else rounded(Color.argb(245, 255, 255, 255), u(16), u(3), a.accent)
-                name.visibility = View.VISIBLE
-                v.alpha = 1f
-                current = e
-                a.lastKey = e.key
-                // debounced: sweeping across the dock doesn't load a picture for every icon passed
-                a.handler.removeCallbacks(bindRunnable)
-                a.handler.postDelayed(bindRunnable, 260)
-            } else {
-                v.background = null
-                name.visibility = View.GONE
-                v.alpha = 0.85f
-            }
-        }
-        return cell
-    }
-
-    // ---------------------------------------------------------------- hero + cards
-
-    private fun showApp(e: AppEntry) {
-        val np = NowPlaying.infoFor(e.pkg)
-        val items = a.feed[e.pkg].orEmpty()
-        val cardItems = items.take(10)
-        buildCards(cardItems, e)
-        if (np != null) { showNowPlaying(e, np); return }
-        a.handler.removeCallbacks(npTick)
-        prevBtn.visibility = View.GONE
-        nextBtn.visibility = View.GONE
-        stopBtn.visibility = View.GONE
-        cover.visibility = View.GONE
-        lastAmbient = null
-        if (items.isEmpty()) showPlain(e) else showItem(items[0], e)
-    }
-
-    private fun showPlain(e: AppEntry) {
-        shown = null
-        kicker.text = "APP"
-        kicker.setTextColor(a.accent)
-        title.text = e.label
-        desc.visibility = View.GONE
-        track.visibility = View.GONE
-        resumeBtn.text = "▶  Open"
-        resumeBtn.setOnClickListener { a.openApp(e) }
-        openBtn.visibility = View.GONE
-        hideBackdrop()
-    }
-
-    private fun showItem(item: TvFeed.Item, e: AppEntry) {
-        shown = item
-        if (!item.square) { cover.visibility = View.GONE; lastAmbient = null }
-        kicker.text = item.kind + "  ·  " + e.label.uppercase(Locale.getDefault())
-        kicker.setTextColor(a.accent)
-        title.text = item.title
-        desc.text = item.desc
-        desc.visibility = if (item.desc.isEmpty()) View.GONE else View.VISIBLE
-        if (item.progress >= 0f) {
-            track.visibility = View.VISIBLE
-            (fill.layoutParams as FrameLayout.LayoutParams).width = (u(170) * item.progress).toInt().coerceAtLeast(2)
-            fill.requestLayout()
-        } else {
-            track.visibility = View.GONE
-        }
-        resumeBtn.text = if (item.kind == "CONTINUE WATCHING") "▶  Resume" else "▶  Play"
-        resumeBtn.setOnClickListener { a.playItem(item, e) }
-        openBtn.text = "Open " + e.label
-        openBtn.setOnClickListener { a.openApp(e) }
-        openBtn.visibility = View.VISIBLE
-
-        val url = item.art
-        Images.load(a, url, if (item.square) 640 else 1280) { bmp ->
-            if (shown !== item || bmp == null) return@load
-            if (item.square) {
-                // a playlist / album cover: cover card + the cover's colours as a soft wash
-                cover.setImageBitmap(bmp)
-                cover.visibility = View.VISIBLE
-                // the visualiser is the backdrop while it runs: a colour wash on top would dim it
-                if (a.viz.live) { hideBackdrop(); lastAmbient = null } else setAmbient(bmp)
-            } else if (a.viz.live) hideBackdrop() else setBackdrop(bmp)
-        }
-    }
-
-    private fun setBackdrop(bmp: android.graphics.Bitmap) {
-        if (bmp === lastBackdrop && backdrop.visibility == View.VISIBLE) return
-        lastBackdrop = bmp
-        val wide = bmp.width >= bmp.height * 1.25f
-        backdrop.scaleType = if (wide) ImageView.ScaleType.CENTER_CROP else ImageView.ScaleType.FIT_END
-        backdrop.setPadding(0, 0, if (wide) 0 else u(70), 0)
-        val wasHidden = backdrop.visibility != View.VISIBLE || backdrop.alpha < 0.05f
-        backdrop.visibility = View.VISIBLE
-        scrim.visibility = View.VISIBLE
-        if (wasHidden) {
-            backdrop.setImageBitmap(bmp)
-            backdrop.animate().alpha(1f).setDuration(380).start()
-            scrim.animate().alpha(1f).setDuration(380).start()
-        } else {
-            backdrop.animate().alpha(0f).setDuration(180).withEndAction {
-                backdrop.setImageBitmap(bmp)
-                backdrop.animate().alpha(1f).setDuration(300).start()
-            }.start()
-        }
-    }
-
-    private fun hideBackdrop() {
-        if (backdrop.visibility != View.VISIBLE) return
-        backdrop.animate().alpha(0f).setDuration(240).withEndAction { backdrop.visibility = View.GONE }.start()
-        scrim.animate().alpha(0f).setDuration(240).withEndAction { scrim.visibility = View.GONE }.start()
-    }
-
-    private fun buildCards(items: List<TvFeed.Item>, e: AppEntry) {
-        cardsRow.removeAllViews()
-        val show = items.size > 1
-        moreLabel.visibility = if (show) View.VISIBLE else View.GONE
-        cardsScroll.visibility = if (show) View.VISIBLE else View.GONE
-        if (!show) return
-        moreLabel.text = "MORE FROM " + e.label.uppercase(Locale.getDefault())
-        for (item in items) {
-            val sq = item.square
-            cardsRow.addView(card(item, e), LinearLayout.LayoutParams(if (sq) u(88) else u(136), if (sq) u(88) else u(77)).apply { setMargins(u(5), u(6), u(5), u(6)) })
-        }
-    }
-
-    private fun card(item: TvFeed.Item, e: AppEntry): View {
-        val r = u(10)
-        val f = FrameLayout(a).apply {
-            background = rounded(Color.argb(50, 255, 255, 255), r)
-            foreground = rounded(Color.TRANSPARENT, r, u(1), Color.argb(40, 255, 255, 255))
-            clipToOutline = true
-            isFocusable = true
-            isClickable = true
-        }
-        val img = ImageView(a).apply { scaleType = ImageView.ScaleType.CENTER_CROP }
-        f.addView(img, matchParent())
-        Images.load(a, item.art, 420) { bmp -> if (bmp != null) img.setImageBitmap(bmp) }
-        val shade = View(a).apply {
-            background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP,
-                intArrayOf(Color.argb(220, 0, 0, 0), Color.argb(0, 0, 0, 0)))
-        }
-        f.addView(shade, FrameLayout.LayoutParams(-1, u(46), Gravity.BOTTOM))
-        val t = label(10.5f, Color.WHITE, "sans-serif-medium").apply {
-            text = item.title
-            maxLines = 1
-            ellipsize = TextUtils.TruncateAt.END
-        }
-        f.addView(t, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply { setMargins(u(8), 0, u(8), u(8)) })
-        if (item.progress >= 0f) {
-            val bar = View(a).apply { setBackgroundColor(Color.WHITE) }
-            f.addView(bar, FrameLayout.LayoutParams((u(136) * item.progress).toInt().coerceAtLeast(2), maxOf(2, u(2)), Gravity.BOTTOM))
-        }
-        f.setOnClickListener { a.playItem(item, e) }
-        f.setOnFocusChangeListener { v, has ->
-            v.foreground = if (has) rounded(Color.TRANSPARENT, r, u(3), a.accent)
-            else rounded(Color.TRANSPARENT, r, u(1), Color.argb(40, 255, 255, 255))
-            v.animate().scaleX(if (has) 1.07f else 1f).scaleY(if (has) 1.07f else 1f).setDuration(130).start()
-            if (has) {
-                a.handler.removeCallbacks(bindRunnable)   // stay on this title
-                showItem(item, e)
-            }
-        }
-        return f
-    }
-}
-
-// ======================================================================================
-//  HORIZON: huge calm clock, time-of-day colour, one row of round icons.
-// ======================================================================================
-internal class HorizonStyle(a: MainActivity) : HomeStyle(a) {
-
-    private val root = FrameLayout(a)
-    override val view: View get() = root
-
-    private val timeV = label(150f, Color.WHITE, "sans-serif-thin", -0.04f)
-    private val dateV = label(15f, Color.argb(210, 255, 255, 255), "sans-serif-light", 0.34f)
-    private val wx1 = label(24f, Color.WHITE, "sans-serif-light")
-    private val wx2 = label(10f, Color.argb(165, 255, 255, 255), "sans-serif", 0.2f)
-    private val customize = a.customizeButton()
-
-    private val capV = label(9f, Color.argb(150, 255, 255, 255), "sans-serif-medium", 0.3f)
-    private val cardBox = LinearLayout(a)
-    private val cardImg = ImageView(a)
-    private val cardTitle = label(12f, Color.WHITE, "sans-serif-medium")
-    private val cardSub = label(10f, Color.argb(170, 255, 255, 255))
-
-    private val hsv = HorizontalScrollView(a)
-    private val row = LinearLayout(a)
-    private val hint = label(8f, Color.argb(100, 255, 255, 255), "sans-serif", 0.3f)
-
-    private var apps: List<AppEntry> = emptyList()
-    private var current: AppEntry? = null
-    private var startKey: String? = null
-    private var shown: TvFeed.Item? = null
-    private val cells = ArrayList<View>()
-    private val bindRunnable = Runnable { current?.let { showFeed(it) } }
-
-    private fun cellW() = u(84)
-
-    init {
-        root.clipChildren = false
-
-        root.addView(timeV, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START).apply { setMargins(u(50), u(56), 0, 0) })
-        root.addView(dateV, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START).apply { setMargins(u(54), u(238), 0, 0) })
-
-        val wx = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.END }
-        wx.addView(wx1)
-        wx.addView(wx2, LinearLayout.LayoutParams(-2, -2).apply { setMargins(0, u(3), 0, 0) })
-        wx.addView(customize, LinearLayout.LayoutParams(-2, -2).apply { setMargins(0, u(10), 0, 0) })
-        root.addView(wx, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply { setMargins(0, u(34), u(50), 0) })
-
-        // "continue" card, only when the focused app has something to continue
-        cardBox.orientation = LinearLayout.VERTICAL
-        cardBox.background = rounded(Color.argb(95, 0, 0, 0), u(14), u(1), Color.argb(34, 255, 255, 255))
-        cardBox.setPadding(u(10), u(10), u(10), u(10))
-        cardBox.visibility = View.GONE
-        cardImg.scaleType = ImageView.ScaleType.CENTER_CROP
-        cardImg.clipToOutline = true
-        cardImg.background = rounded(Color.argb(40, 255, 255, 255), u(8))
-        cardBox.addView(cardImg, LinearLayout.LayoutParams(u(152), u(86)))
-        cardBox.addView(cardTitle.apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(u(152), -2).apply { setMargins(0, u(8), 0, 0) })
-        cardBox.addView(cardSub.apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(u(152), -2).apply { setMargins(0, u(2), 0, 0) })
-        capV.visibility = View.GONE
-        root.addView(capV, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply { setMargins(0, u(152), u(50), 0) })
-        root.addView(cardBox, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply { setMargins(0, u(170), u(50), 0) })
-
-        // the round icon row
-        hsv.isHorizontalScrollBarEnabled = false
-        hsv.overScrollMode = View.OVER_SCROLL_NEVER
-        hsv.clipChildren = false
-        hsv.clipToPadding = false
-        row.orientation = LinearLayout.HORIZONTAL
-        row.clipChildren = false
-        row.clipToPadding = false
-        val side = (a.resources.displayMetrics.widthPixels - cellW()) / 2
-        row.setPadding(side, u(34), side, u(34))
-        hsv.addView(row, ViewGroup.LayoutParams(-2, -2))
-        hsv.setOnScrollChangeListener { _, _, _, _, _ -> applyScale() }
-        root.addView(hsv, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply { setMargins(0, 0, 0, u(48)) })
-
-        hint.text = "◀ ▶  BROWSE     ·     OK  OPEN     ·     HOLD OK  OPTIONS"
-        root.addView(hint, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { setMargins(0, 0, 0, u(18)) })
-        refreshHeader()
-        NowPlaying.onChange = { current?.let { showFeed(it) } }
-    }
-
-    // colour of the glow follows the time of day
-    private fun palette(hour: Int): IntArray = when (hour) {
-        in 5..8 -> intArrayOf(Color.rgb(255, 170, 64), Color.rgb(255, 110, 130), Color.rgb(64, 160, 255))      // morning
-        in 9..16 -> intArrayOf(Color.rgb(0, 150, 255), Color.rgb(0, 229, 200), Color.rgb(100, 110, 255))      // day
-        in 17..20 -> intArrayOf(Color.rgb(255, 112, 67), Color.rgb(214, 60, 140), Color.rgb(110, 60, 200))    // evening
-        else -> intArrayOf(Color.rgb(0, 170, 140), Color.rgb(30, 90, 210), Color.rgb(90, 45, 170))            // night
-    }
-
-    private fun refreshHeader() {
-        timeV.text = a.nowStr(a.clockPattern())
-        dateV.text = a.nowStr("EEEE  ·  d MMMM").uppercase(Locale.getDefault())
-        wx1.text = a.wxMain()
-        wx2.text = a.wxSub()
-        a.bg.setColors(palette(java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)))
-    }
-
-    override fun bind(apps: List<AppEntry>, focusKey: String?) {
-        this.apps = apps
-        startKey = focusKey
-        row.removeAllViews()
-        cells.clear()
-        for (e in apps) {
-            val c = cell(e)
-            cells.add(c)
-            row.addView(c, LinearLayout.LayoutParams(cellW(), -2))
-        }
-        refreshHeader()
-        // put the starting app in the middle straight away
-        hsv.post {
-            val k = startKey
-            val idx = apps.indexOfFirst { it.key == k }.coerceAtLeast(0)
-            cells.getOrNull(idx)?.let { hsv.scrollTo(it.left + it.width / 2 - hsv.width / 2, 0) }
-            applyScale()
-        }
-    }
-
-    override fun currentKey(): String? = current?.key ?: startKey
-
-    override fun refocus() {
-        val cell = cells.firstOrNull { it.tag == (current?.key ?: startKey) } ?: cells.firstOrNull()
-        cell?.post { cell.requestFocus() }
-    }
-
-    override fun onTick() = refreshHeader()
-    override fun onWeather() = refreshHeader()
-    override fun onFeed() { current?.let { showFeed(it) } }
-    override fun destroy() { a.handler.removeCallbacks(bindRunnable); NowPlaying.onChange = null }
-
-    private fun applyScale() {
-        val w = hsv.width
-        if (w == 0) return
-        val center = hsv.scrollX + w / 2f
-        val cw = cellW().toFloat()
-        for (i in 0 until row.childCount) {
-            val c = row.getChildAt(i)
-            val d = abs((c.left + c.width / 2f) - center) / cw
-            val f = (1f - d).coerceIn(0f, 1f)
-            val s = 1f + 0.62f * f
-            c.scaleX = s
-            c.scaleY = s
-            c.alpha = 0.5f + 0.5f * f
-        }
-    }
-
-    private fun cell(e: AppEntry): View {
-        val size = u(46)
-        val disc = FrameLayout(a).apply {
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
-                setColor(Color.argb(if (IconStyles.hasOwnDisc(a.store.iconStyle)) 0 else 38, 255, 255, 255))
-            }
-        }
-        // icons that bring their own round plate fill the whole disc
-        val pad = if (IconStyles.hasOwnDisc(a.store.iconStyle)) 0 else (size * 0.17f).toInt()
-        disc.addView(ImageView(a).apply { setImageDrawable(e.icon) }, FrameLayout.LayoutParams(-1, -1).apply { setMargins(pad, pad, pad, pad) })
-        val name = label(9f, Color.WHITE, "sans-serif-medium", 0.04f).apply {
-            text = e.label
-            maxLines = 1
-            ellipsize = TextUtils.TruncateAt.END
-            gravity = Gravity.CENTER
-            alpha = 0f
+        val name = titleLabel(10.5f, 2, Color.argb(235, 255, 255, 255)).apply {
+            setTitle(e.label)
+            gravity = Gravity.CENTER_HORIZONTAL
         }
         val cell = LinearLayout(a).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
             isFocusable = true
             isClickable = true
-            clipChildren = false
             tag = e.key
+            setPadding(u(6), u(9), u(6), u(7))
         }
-        cell.addView(disc, LinearLayout.LayoutParams(size, size))
-        cell.addView(name, LinearLayout.LayoutParams(cellW() - u(6), -2).apply { setMargins(0, u(5), 0, 0) })
+        cell.addView(icon, LinearLayout.LayoutParams(u(38), u(38)))
+        cell.addView(name, LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, u(6), 0, 0) })
+        cell.layoutParams = LinearLayout.LayoutParams(width, -2)
         cell.setOnClickListener { a.openApp(e) }
-        cell.setOnLongClickListener { a.showAppMenu(e, "all"); true }
+        cell.setOnLongClickListener { a.showAppMenu(e); true }
         cell.setOnFocusChangeListener { v, has ->
-            disc.background = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
-                val own = IconStyles.hasOwnDisc(a.store.iconStyle)
-                setColor(Color.argb(if (own) 0 else if (has) 70 else 38, 255, 255, 255))
-                if (has) setStroke(maxOf(2, u(2.5f)), Color.WHITE)
-            }
-            name.animate().alpha(if (has) 1f else 0f).setDuration(140).start()
-            if (has) {
-                current = e
-                a.lastKey = e.key
-                hsv.smoothScrollTo(v.left + v.width / 2 - hsv.width / 2, 0)
-                a.handler.removeCallbacks(bindRunnable)
-                a.handler.postDelayed(bindRunnable, 280)
-            }
+            v.background = if (has) rounded(Color.argb(70, 255, 255, 255), u(12), u(3), a.accent) else null
         }
         return cell
     }
 
-    private fun showFeed(e: AppEntry) {
-        val np = NowPlaying.infoFor(e.pkg)
-        if (np != null) {
-            // now-playing card: OK = play/pause, LEFT / RIGHT = previous / next
-            shown = null
-            capV.text = (if (np.playing) "NOW PLAYING" else "PAUSED") + "  ·  " + e.label.uppercase(Locale.getDefault()) + "  ·  HOLD OK TO STOP"
-            capV.visibility = View.VISIBLE
-            cardBox.visibility = View.VISIBLE
-            cardTitle.text = (if (np.playing) "▶  " else "❚❚  ") + np.title
-            cardSub.text = np.artist.ifEmpty { np.album }
-            cardImg.layoutParams.height = u(140)      // album covers are square
-            cardImg.requestLayout()
-            if (np.art != null) cardImg.setImageBitmap(np.art) else cardImg.setImageDrawable(null)
-            cardBox.isFocusable = true
-            cardBox.isClickable = true
-            cardBox.setOnClickListener { NowPlaying.playPause(e.pkg) }
-            cardBox.isLongClickable = true
-            cardBox.setOnLongClickListener { NowPlaying.stopPlayback(e.pkg); true }
-            cardBox.setOnKeyListener { _, k, ev ->
-                if (ev.action != android.view.KeyEvent.ACTION_DOWN) false
-                else when (k) {
-                    android.view.KeyEvent.KEYCODE_DPAD_LEFT -> { NowPlaying.prev(e.pkg); true }
-                    android.view.KeyEvent.KEYCODE_DPAD_RIGHT -> { NowPlaying.next(e.pkg); true }
-                    else -> false
-                }
-            }
-            cardBox.setOnFocusChangeListener { v, has ->
-                v.background = rounded(Color.argb(95, 0, 0, 0), u(14), if (has) u(3) else u(1), if (has) a.accent else Color.argb(34, 255, 255, 255))
-            }
-            return
+    /** is [v] this view or inside it? */
+    protected fun View.holds(v: View?): Boolean {
+        var p: View? = v
+        while (p != null) {
+            if (p === this) return true
+            p = p.parent as? View
         }
-        cardImg.layoutParams.height = u(86)
-        cardBox.isFocusable = false
-        cardBox.setOnKeyListener(null)
-        cardBox.setOnLongClickListener(null)
-        cardBox.isLongClickable = false
-        cardBox.setOnFocusChangeListener(null)
-        val item = a.feed[e.pkg]?.firstOrNull()
-        shown = item
-        if (item == null) {
-            cardBox.visibility = View.GONE
-            capV.visibility = View.GONE
-            return
+        return false
+    }
+}
+
+/** A text view for titles: when the text does not fit its lines, it ends after a whole word ("Long title…"). */
+internal class TitleView(ctx: Context) : TextView(ctx) {
+    private var full = ""
+    private var fitting = false
+
+    fun setTitle(t: String) {
+        full = t
+        text = t
+    }
+
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+        if (fitting || full.isEmpty()) return
+        val l = layout ?: return
+        val last = l.lineCount - 1
+        if (last < 0 || l.getEllipsisCount(last) <= 0) return
+        val shown = text.toString()
+        val cut = HomeLogic.cutAtWord(shown.removeSuffix("…"), l.getLineStart(last) + l.getEllipsisStart(last))
+        if (cut == shown) return
+        fitting = true
+        text = cut
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+        fitting = false
+    }
+}
+
+/**
+ * Lanes of cards, one under the other: what the apps publish. LEFT / RIGHT walk a lane, UP / DOWN change lanes;
+ * the focused lane slides to the top and the next one peeks in below it.
+ * Cards are only built, and their pictures only loaded, for the lanes on screen; the others are released again.
+ */
+internal class LaneList(private val a: MainActivity, cardU: Float, sideU: Float, private val host: Host) {
+
+    interface Host {
+        fun onItemFocus(item: TvFeed.Item) {}
+        /** UP was pressed in the first lane */
+        fun onLaneExitUp() {}
+        /** LEFT was pressed on the first card of a lane */
+        fun onLaneExitLeft() {}
+    }
+
+    val view = ScrollView(a)
+    private val col = LinearLayout(a)
+    private val rows = ArrayList<Row>()
+    private var sig = ""
+    private val cardH = a.u(cardU)
+    private val side = a.u(sideU)
+    private val gap = a.u(5)
+    private val pad = a.u(8)
+
+    /** the lane that holds (or last held) the focus */
+    var current = 0
+        private set
+    val count: Int get() = rows.size
+    /** height of one lane with its title */
+    val laneHeight: Int get() = a.u(18) + cardH + pad * 2
+
+    init {
+        view.isVerticalScrollBarEnabled = false
+        view.overScrollMode = View.OVER_SCROLL_NEVER
+        view.isFocusable = false
+        view.descendantFocusability = ViewGroup.FOCUS_AFTER_DESCENDANTS
+        col.orientation = LinearLayout.VERTICAL
+        view.addView(col, ViewGroup.LayoutParams(-1, -2))
+    }
+
+    private inner class Card(val item: TvFeed.Item, val row: Row, val pos: Int) {
+        val box = FrameLayout(a)
+        val img = ImageView(a)
+        /** 0 no picture, 1 loading, 2 shown */
+        var state = 0
+    }
+
+    private inner class Row(val lane: HomeLogic.Lane, val index: Int) {
+        val box = LinearLayout(a)
+        val hsv = HorizontalScrollView(a)
+        val strip = LinearLayout(a)
+        val cards = ArrayList<Card>()
+        var built = false
+        var last = 0
+
+        init {
+            box.orientation = LinearLayout.VERTICAL
+            box.addView(TextView(a).apply {
+                text = lane.title.uppercase(java.util.Locale.getDefault())
+                setTextSize(TypedValue.COMPLEX_UNIT_PX, a.u(9.5f).toFloat())
+                setTextColor(Color.argb(205, 255, 255, 255))
+                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                letterSpacing = 0.22f
+                includeFontPadding = false
+                maxLines = 1
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(side, 0, side, 0)
+            }, LinearLayout.LayoutParams(-1, a.u(18)))
+            hsv.isHorizontalScrollBarEnabled = false
+            hsv.overScrollMode = View.OVER_SCROLL_NEVER
+            hsv.clipChildren = false
+            hsv.clipToPadding = false
+            strip.orientation = LinearLayout.HORIZONTAL
+            strip.clipChildren = false
+            strip.clipToPadding = false
+            strip.setPadding(side - gap, pad, side, pad)
+            hsv.addView(strip, ViewGroup.LayoutParams(-2, -1))
+            box.addView(hsv, LinearLayout.LayoutParams(-1, cardH + pad * 2))
         }
-        capV.text = item.kind + "  ·  " + e.label.uppercase(Locale.getDefault())
-        capV.visibility = View.VISIBLE
-        cardBox.visibility = View.VISIBLE
-        cardImg.layoutParams.height = if (item.square) u(140) else u(86)
-        cardImg.requestLayout()
-        cardTitle.text = item.title
-        cardSub.text = if (item.progress >= 0f) "${(item.progress * 100).toInt()}% watched" else item.desc
-        cardImg.setImageDrawable(null)
-        Images.load(a, item.art, 420) { bmp -> if (shown === item && bmp != null) cardImg.setImageBitmap(bmp) }
-        cardBox.setOnClickListener { a.playItem(item, e) }
+
+        fun build() {
+            if (built) return
+            built = true
+            for ((i, item) in lane.items.withIndex()) {
+                val c = card(item, this, i)
+                cards.add(c)
+                val w = if (item.square) cardH else cardH * 16 / 9
+                strip.addView(c.box, LinearLayout.LayoutParams(w, cardH).apply { setMargins(gap, 0, gap, 0) })
+            }
+        }
+
+        /** pictures for the cards up to [upTo] */
+        fun load(upTo: Int) {
+            build()
+            for (i in 0..minOf(upTo, cards.size - 1)) {
+                val c = cards[i]
+                if (c.state != 0) continue
+                c.state = 1
+                val w = if (c.item.square) cardH else cardH * 16 / 9
+                Images.load(a, c.item.art, w) { bmp -> if (c.state == 1 && bmp != null) show(c, bmp, w) else if (c.state == 1) c.state = 0 }
+            }
+        }
+
+        fun unload() {
+            for (c in cards) {
+                if (c.state != 0) { c.img.setImageDrawable(null); c.state = 0 }
+            }
+        }
+    }
+
+    private fun show(c: Card, bmp: Bitmap, w: Int) {
+        c.state = 2
+        if (!c.item.square && bmp.height > bmp.width * 1.15f) {
+            // an upright poster in a wide card: keep its top (faces, the title), not its middle
+            val s = w.toFloat() / bmp.width
+            c.img.scaleType = ImageView.ScaleType.MATRIX
+            c.img.imageMatrix = Matrix().apply { setScale(s, s) }
+        } else {
+            c.img.scaleType = ImageView.ScaleType.CENTER_CROP
+        }
+        c.img.setImageBitmap(bmp)
+    }
+
+    private fun ring(focused: Boolean, r: Int) = GradientDrawable().apply {
+        setColor(Color.TRANSPARENT)
+        cornerRadius = r.toFloat()
+        if (focused) setStroke(a.u(3), a.accent) else setStroke(maxOf(1, a.u(1)), Color.argb(46, 255, 255, 255))
+    }
+
+    private fun card(item: TvFeed.Item, row: Row, pos: Int): Card {
+        val c = Card(item, row, pos)
+        val r = a.u(10)
+        val f = c.box
+        f.background = GradientDrawable().apply { setColor(Color.argb(150, 30, 32, 44)); cornerRadius = r.toFloat() }
+        f.foreground = ring(false, r)
+        f.clipToOutline = true
+        f.isFocusable = true
+        f.isClickable = true
+        f.addView(c.img, FrameLayout.LayoutParams(-1, -1))
+        // the dark band the title sits on
+        f.addView(View(a).apply {
+            background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP,
+                intArrayOf(Color.argb(235, 0, 0, 0), Color.argb(170, 0, 0, 0), Color.argb(0, 0, 0, 0)))
+        }, FrameLayout.LayoutParams(-1, cardH * 62 / 100, Gravity.BOTTOM))
+        val hasBar = item.progress >= 0f
+        f.addView(TitleView(a).apply {
+            setTextSize(TypedValue.COMPLEX_UNIT_PX, a.u(10.5f).toFloat())
+            setTextColor(Color.WHITE)
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            maxLines = 2
+            ellipsize = TextUtils.TruncateAt.END
+            setTitle(item.title)
+        }, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply { setMargins(a.u(8), 0, a.u(8), if (hasBar) a.u(11) else a.u(6)) })
+        if (hasBar) {
+            val bar = FrameLayout(a).apply { setBackgroundColor(Color.argb(80, 255, 255, 255)) }
+            val w = (if (item.square) cardH else cardH * 16 / 9) - a.u(16)
+            bar.addView(View(a).apply { setBackgroundColor(Color.WHITE) },
+                FrameLayout.LayoutParams((w * item.progress).toInt().coerceAtLeast(2), -1))
+            f.addView(bar, FrameLayout.LayoutParams(-1, maxOf(2, a.u(2)), Gravity.BOTTOM).apply { setMargins(a.u(8), 0, a.u(8), a.u(6)) })
+        }
+        if (row.lane.crossApp) {
+            // which app it comes from
+            a.appFor(item.pkg)?.let { e ->
+                f.addView(ImageView(a).apply {
+                    setImageDrawable(e.icon.constantState?.newDrawable(a.resources)?.mutate() ?: e.icon)
+                    background = GradientDrawable().apply { setColor(Color.argb(150, 0, 0, 0)); cornerRadius = a.u(6).toFloat() }
+                    setPadding(a.u(2), a.u(2), a.u(2), a.u(2))
+                }, FrameLayout.LayoutParams(a.u(22), a.u(22), Gravity.TOP or Gravity.END).apply { setMargins(0, a.u(6), a.u(6), 0) })
+            }
+        }
+        f.setOnClickListener { a.openItem(item, null) }
+        f.setOnLongClickListener { a.showItemMenu(item); true }
+        f.setOnFocusChangeListener { v, has ->
+            v.foreground = ring(has, r)
+            v.animate().scaleX(if (has) 1.06f else 1f).scaleY(if (has) 1.06f else 1f).setDuration(130).start()
+            if (has) focused(c)
+        }
+        f.setOnKeyListener { _, k, ev ->
+            when (k) {
+                KeyEvent.KEYCODE_DPAD_LEFT -> { if (ev.action == KeyEvent.ACTION_DOWN) { if (pos == 0) host.onLaneExitLeft() else row.cards[pos - 1].box.requestFocus() }; true }
+                KeyEvent.KEYCODE_DPAD_RIGHT -> { if (ev.action == KeyEvent.ACTION_DOWN && pos < row.cards.size - 1) row.cards[pos + 1].box.requestFocus(); true }
+                KeyEvent.KEYCODE_DPAD_UP -> { if (ev.action == KeyEvent.ACTION_DOWN) { if (row.index == 0) host.onLaneExitUp() else focus(row.index - 1) }; true }
+                KeyEvent.KEYCODE_DPAD_DOWN -> { if (ev.action == KeyEvent.ACTION_DOWN && row.index < rows.size - 1) focus(row.index + 1); true }
+                else -> false
+            }
+        }
+        return c
+    }
+
+    private fun focused(c: Card) {
+        val row = c.row
+        current = row.index
+        row.last = c.pos
+        window(row.index)
+        row.load(c.pos + 7)
+        view.post {
+            row.hsv.smoothScrollTo((c.box.left - side).coerceAtLeast(0), 0)
+            view.smoothScrollTo(0, row.box.top)
+        }
+        host.onItemFocus(c.item)
+    }
+
+    /** lanes around lane [k] are kept ready, the rest give their pictures back */
+    private fun window(k: Int) {
+        for (r in rows) {
+            if (r.index in (k - 1)..(k + 2)) r.load(maxOf(r.last + 7, 7)) else r.unload()
+        }
+    }
+
+    /** Shows these lanes. Returns false when they are what is already shown. Keeps the focus in the same lane. */
+    fun setLanes(lanes: List<HomeLogic.Lane>): Boolean {
+        val s = lanes.joinToString("\n") { it.signature() }
+        if (s == sig) return false
+        sig = s
+        val had = view.hasFocus()
+        val keepLane = current
+        val keepPos = rows.getOrNull(current)?.last ?: 0
+        col.removeAllViews()
+        rows.clear()
+        for ((i, l) in lanes.withIndex()) {
+            val r = Row(l, i)
+            rows.add(r)
+            col.addView(r.box, LinearLayout.LayoutParams(-1, -2))
+        }
+        // room below the last lane, so that it can slide to the top as well
+        col.setPadding(0, 0, 0, laneHeight * 3)
+        current = keepLane.coerceIn(0, maxOf(0, rows.size - 1))
+        rows.getOrNull(current)?.last = keepPos
+        view.scrollTo(0, 0)
+        window(current)
+        if (had) { if (rows.isEmpty()) host.onLaneExitUp() else focus(current) }
+        else if (rows.isNotEmpty()) view.post { view.scrollTo(0, rows[current].box.top) }
+        return true
+    }
+
+    /** moves the focus to lane [index] (to the card last used there). False when there is no such lane. */
+    fun focus(index: Int = current): Boolean {
+        val row = rows.getOrNull(index) ?: return false
+        row.build()
+        val c = row.cards.getOrNull(row.last.coerceIn(0, maxOf(0, row.cards.size - 1))) ?: return false
+        c.box.requestFocus()
+        return true
+    }
+
+    fun firstItem(): TvFeed.Item? = rows.firstOrNull()?.lane?.items?.firstOrNull()
+
+    fun release() {
+        for (r in rows) r.unload()
     }
 }
