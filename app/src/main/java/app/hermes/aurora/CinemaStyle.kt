@@ -189,6 +189,7 @@ internal class CinemaStyle(a: MainActivity) : HomeStyle(a) {
         openBtn.visibility = View.VISIBLE
         val art = np.art
         if (art != null) {
+            cover.scaleType = ImageView.ScaleType.CENTER_CROP
             cover.setImageBitmap(art)
             cover.visibility = View.VISIBLE
             a.viz.evaluate()
@@ -396,11 +397,12 @@ internal class CinemaStyle(a: MainActivity) : HomeStyle(a) {
         } else {
             track.visibility = View.GONE
         }
-        resumeBtn.text = if (item.kind == "CONTINUE WATCHING") "▶  Resume" else "▶  Play"
+        resumeBtn.text = if (item.channel) "▶  Open " + e.label else if (item.kind == "CONTINUE WATCHING") "▶  Resume" else "▶  Play"
         resumeBtn.setOnClickListener { a.openItem(item, e) }
         openBtn.text = "Open " + e.label
         openBtn.setOnClickListener { a.openApp(e) }
-        openBtn.visibility = View.VISIBLE
+        // a channel can only open its app: one button says so
+        openBtn.visibility = if (item.channel) View.GONE else View.VISIBLE
 
         // extra artwork (optional): what is already known paints at once; otherwise the app's own picture shows
         // first and TMDB's replaces it when the answer arrives
@@ -423,6 +425,8 @@ internal class CinemaStyle(a: MainActivity) : HomeStyle(a) {
             if (bmp == null) { if (fallback != null) loadArt(item, fallback, null); return@load }
             if (item.square) {
                 // a playlist / album cover: cover card + the cover's colours as a soft wash
+                // a channel logo is small: shown at its own size it stays sharp
+                cover.scaleType = if (item.channel && bmp.width < u(190)) ImageView.ScaleType.CENTER_INSIDE else ImageView.ScaleType.CENTER_CROP
                 cover.setImageBitmap(bmp)
                 cover.visibility = View.VISIBLE
                 // the visualiser is the backdrop while it runs: a colour wash on top would dim it

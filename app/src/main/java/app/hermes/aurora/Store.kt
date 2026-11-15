@@ -97,6 +97,26 @@ class Store(ctx: Context) {
         get() = p.getString("tmdbKey", "") ?: ""
         set(v) { p.edit().putString("tmdbKey", v.trim()).apply() }
 
+    /** TV channels from the user's own playlist: off unless a playlist is given */
+    var iptv: Boolean
+        get() = p.getBoolean("iptv", false)
+        set(v) { p.edit().putBoolean("iptv", v).apply() }
+    /** the playlist link (it contains the subscription key: kept out of the settings backup) */
+    var iptvUrl: String
+        get() = p.getString("iptvUrl", "") ?: ""
+        set(v) { p.edit().putString("iptvUrl", v.trim()).apply() }
+    /** optional: a second playlist that carries logos and the guide for the first */
+    var iptvExtra: String
+        get() = p.getString("iptvExtra", "") ?: ""
+        set(v) { p.edit().putString("iptvExtra", v.trim()).apply() }
+    var iptvGroup: String
+        get() = p.getString("iptvGroup", "") ?: ""
+        set(v) { p.edit().putString("iptvGroup", v).apply() }
+    /** the package of the app a channel opens */
+    var iptvApp: String
+        get() = p.getString("iptvApp", "") ?: ""
+        set(v) { p.edit().putString("iptvApp", v).apply() }
+
     var pauseOnSwitch: Boolean
         get() = p.getBoolean("pauseOnSwitch", true)
         set(v) { p.edit().putBoolean("pauseOnSwitch", v).apply() }
@@ -117,7 +137,7 @@ class Store(ctx: Context) {
         set(v) { p.edit().putInt("saverMode", v).apply() }
 
     // ---- backup / restore of the settings (not the weather cache)
-    private val skip = setOf("lat", "lon", "geoFor", "place", "wTemp", "wHi", "wLo", "wCode", "wDay", "wTime", "recents", "askedTv", "adblock", "tmdbKey")
+    private val skip = setOf("lat", "lon", "geoFor", "place", "wTemp", "wHi", "wLo", "wCode", "wDay", "wTime", "recents", "askedTv", "adblock", "tmdbKey", "iptvUrl")
     private var backupListener: android.content.SharedPreferences.OnSharedPreferenceChangeListener? = null
 
     fun exportJson(): String {

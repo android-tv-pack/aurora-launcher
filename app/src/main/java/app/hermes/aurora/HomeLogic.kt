@@ -98,7 +98,7 @@ internal object HomeLogic {
     fun musicLanes(
         feed: Map<String, List<TvFeed.Item>>, appOrder: List<String>, perLane: Int = 12, labelOf: (String) -> String?
     ): List<Lane> = appOrder.distinct().mapNotNull { p ->
-        val covers = feed[p].orEmpty().filter { it.square }
+        val covers = feed[p].orEmpty().filter { it.square && !it.channel }
         val name = labelOf(p)
         if (covers.isEmpty() || name == null) null else Lane(name, covers.take(perLane), false)
     }

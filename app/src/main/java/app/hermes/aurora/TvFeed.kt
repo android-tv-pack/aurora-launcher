@@ -38,6 +38,8 @@ object TvFeed {
     ) {
         /** something the viewer can pick up again */
         val resume: Boolean get() = watchNext || progress > 0f
+        /** a TV channel (from the user's playlist): shown with its logo, opens the IPTV app */
+        val channel: Boolean get() = type == 6
     }
 
     fun allowed(ctx: Context): Boolean =

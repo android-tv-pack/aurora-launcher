@@ -183,6 +183,8 @@ class MainActivity : Activity() {
         NowPlaying.start(this)
         AdBlock.ensure(this, store)
         if (Tmdb.takeDroppedKey(this, store)) dirty = true
+        Iptv.takeDropped(this, store)
+        Iptv.refresh(this, store, false) { refreshPanel?.invoke(); if (Iptv.stamp(store) != tvStamp) loadFeed() }
         lastInteraction = android.os.SystemClock.elapsedRealtime()
         handler.removeCallbacks(saverTick)
         handler.postDelayed(saverTick, 10_000)
@@ -436,6 +438,8 @@ class MainActivity : Activity() {
 
     private fun updateClock() {
         currentStyle?.onTick()
+        // TV channels: a new programme has started on one of them
+        if (Iptv.on(store) && Iptv.stamp(store) != tvStamp) loadFeed()
         updateNight(true)
     }
 
@@ -860,6 +864,20 @@ class MainActivity : Activity() {
             Row("Pause music when another app opens", { onOff(store.pauseOnSwitch) }) {
                 store.pauseOnSwitch = !store.pauseOnSwitch
             },
+            Row("TV channels", { Iptv.label(store) }) { askIptv() },
+            Row("Channel group", { Iptv.groupLabel(store) }, { Iptv.on(store) && Iptv.groupNames().size > 1 }) { d ->
+                val g = Iptv.groupNames()
+                store.iptvGroup = g[(g.indexOf(Iptv.groupLabel(store)) + d + g.size) % g.size]
+                loadFeed()
+            },
+            Row("Channels open in", { iptvApp()?.label ?: "" }, { Iptv.on(store) }) { d ->
+                val hidden = store.hidden.toSet()
+                val l = apps.filter { it.key !in hidden && !it.key.endsWith("/googletv") && it.pkg != packageName }.distinctBy { it.pkg }
+                if (l.isNotEmpty()) {
+                    store.iptvApp = l[(l.indexOfFirst { it.pkg == iptvApp()?.pkg } + d + l.size) % l.size].pkg
+                    loadFeed()
+                }
+            },
             Row("Extra artwork (TMDB)", { Tmdb.label(store) }) {
                 if (store.tmdbKey.isEmpty() || Tmdb.keyRefused) askTmdbKey()
                 else { store.tmdb = !store.tmdb; currentStyle?.onFeed(); render(null) }
@@ -1002,6 +1020,41 @@ class MainActivity : Activity() {
             .show()
     }
 
+    /** the user's own IPTV playlist; typed here, or dropped as a file (see Iptv.takeDropped) */
+    private fun askIptv() {
+        fun field(value: String, hintText: String) = EditText(this).apply {
+            setText(value)
+            hint = hintText
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+            setSingleLine(true)
+        }
+        val url = field(store.iptvUrl, "Playlist link (.m3u / .m3u8)")
+        val extra = field(store.iptvExtra, "Optional: a playlist with logos and guide")
+        val holder = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(u(24), u(8), u(24), 0)
+            addView(url); addView(extra)
+        }
+        dialogBuilder()
+            .setTitle("TV channels")
+            .setMessage("Shows the channels of your IPTV playlist on the home, with logos and what is on now when the playlist (or the optional second one) carries them. " +
+                "A channel opens your IPTV app. The link stays on this device.")
+            .setView(holder)
+            .setPositiveButton("Save") { _, _ ->
+                val changed = url.text.toString().trim() != store.iptvUrl || extra.text.toString().trim() != store.iptvExtra
+                store.iptvUrl = url.text.toString()
+                store.iptvExtra = extra.text.toString()
+                store.iptv = store.iptvUrl.isNotEmpty()
+                if (changed) Iptv.forget(this)
+                refreshPanel?.invoke()
+                loadFeed()
+                Iptv.refresh(this, store, changed) { refreshPanel?.invoke(); if (Iptv.stamp(store) != tvStamp) loadFeed() }
+            }
+            .setNeutralButton("Turn off") { _, _ -> store.iptv = false; refreshPanel?.invoke(); loadFeed() }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
     /** TMDB needs the user's own free key; typed here, or dropped as a file (see Tmdb.takeDroppedKey) */
     private fun askTmdbKey() {
         val input = EditText(this).apply {
@@ -1059,7 +1112,7 @@ class MainActivity : Activity() {
 
     private fun loadFeed() {
         if (!store.preview || !TvFeed.allowed(this)) {
-            feed = emptyMap()
+            feed = withChannels(emptyMap())
             currentStyle?.onFeed()
             return
         }
@@ -1067,13 +1120,34 @@ class MainActivity : Activity() {
             val f = try { TvFeed.load(this) } catch (e: Exception) { emptyMap() }
             runOnUiThread {
                 if (isDestroyed) return@runOnUiThread
-                feed = f
+                feed = withChannels(f)
                 android.util.Log.i("AuroraFeed", "apps with published titles: " +
-                        (if (f.isEmpty()) "none" else f.entries.joinToString { "${it.key}=${it.value.size}" }))
+                        (if (feed.isEmpty()) "none" else feed.entries.joinToString { "${it.key}=${it.value.size}" }))
                 currentStyle?.onFeed()
             }
         }.start()
     }
+
+    /** the app TV channels open in: the one chosen in Customize, else the first that looks like an IPTV player */
+    internal fun iptvApp(): AppEntry? {
+        val hidden = store.hidden.toSet()
+        val visible = apps.filter { it.key !in hidden && !it.key.endsWith("/googletv") && it.pkg != packageName }
+        visible.firstOrNull { it.pkg == store.iptvApp }?.let { return it }
+        val hint = Regex("ott|iptv|tivimate|televizo|smarters|kodi|vlc", RegexOption.IGNORE_CASE)
+        return visible.firstOrNull { hint.containsMatchIn(it.pkg) || hint.containsMatchIn(it.label) } ?: visible.firstOrNull()
+    }
+
+    /** what the apps publish, plus the TV channels of the user's playlist under the app they open in */
+    private fun withChannels(f: Map<String, List<TvFeed.Item>>): Map<String, List<TvFeed.Item>> {
+        tvStamp = Iptv.stamp(store)
+        val app = iptvApp() ?: return f
+        val ch = Iptv.items(store, app.pkg)
+        if (ch.isEmpty()) return f
+        val out = LinkedHashMap(f)
+        out[app.pkg] = ch + f[app.pkg].orEmpty()
+        return out
+    }
+    private var tvStamp = ""
 
     override fun onRequestPermissionsResult(code: Int, perms: Array<out String>, results: IntArray) {
         super.onRequestPermissionsResult(code, perms, results)
