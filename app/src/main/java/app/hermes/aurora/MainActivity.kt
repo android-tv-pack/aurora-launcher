@@ -96,6 +96,7 @@ class MainActivity : Activity() {
     internal fun u(n: Int): Int = u(n.toFloat())
 
     internal val accent: Int get() = Themes.ALL[store.theme].accent
+    private val isBeta = BuildConfig.VERSION_NAME.contains("beta")
 
     private val timeReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) {
@@ -862,7 +863,8 @@ class MainActivity : Activity() {
             setPadding(u(20), u(14), u(20), u(10))
         }
         col.addView(TextView(this).apply {
-            text = "CUSTOMIZE"
+            // a beta build says so (the version name ends in "-beta")
+            text = if (isBeta) "CUSTOMIZE   ·   BETA" else "CUSTOMIZE"
             setTextSize(TypedValue.COMPLEX_UNIT_PX, u(12).toFloat())
             setTextColor(accent)
             letterSpacing = 0.3f
@@ -921,7 +923,7 @@ class MainActivity : Activity() {
             if (first == null) first = line
         }
         col.addView(TextView(this).apply {
-            text = "Aurora 3.19  ·  free, no ads, no account"
+            text = "Aurora " + BuildConfig.VERSION_NAME.replace("-", " ") + "  ·  free, no ads, no account"
             setTextSize(TypedValue.COMPLEX_UNIT_PX, u(10).toFloat())
             setTextColor(Color.argb(110, 255, 255, 255))
             setPadding(u(6), u(10), 0, 0)
