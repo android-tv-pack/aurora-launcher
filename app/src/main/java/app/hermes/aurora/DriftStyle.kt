@@ -15,7 +15,9 @@ import java.util.Locale
 
 /**
  * DRIFT: almost nothing on screen. The scene (or the theme's colours) fills it; a large thin clock, the date,
- * the weather in a corner and one pill that resumes the newest title (or opens the last-used app).
+ * the weather in a corner and, in the centre, one pill with the app that was opened last (OK opens it, or continues
+ * what that app has to continue). While something plays, the pill gives its place to what plays: cover, title and
+ * the previous / play-pause / next buttons.
  *
  * From this resting screen each direction slides a panel in: UP apps, LEFT music, DOWN watch, RIGHT pins.
  * A panel leaves again on Back, or by itself after half a minute without a key press.
@@ -34,7 +36,26 @@ internal class DriftStyle(a: MainActivity) : HomeStyle(a) {
     private val pill = LinearLayout(a)
     private val pillTitle = titleLabel(14f, 1)
     private val pillSub = label(10.5f, Color.argb(215, 255, 255, 255))
+    private val pillIcon = ImageView(a)
     private val hints = ArrayList<View>()
+
+    // what plays, in the pill's place: cover, title, artist and the transport buttons
+    private val ctrCard = LinearLayout(a)
+    private val ctrCover = ImageView(a)
+    private val ctrCap = label(9f, a.accent, "sans-serif-medium", 0.26f).apply { maxLines = 1 }
+    private val ctrTitle = titleLabel(14f, 1)
+    private val ctrBy = label(10.5f, Color.argb(215, 255, 255, 255)).apply {
+        maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END; includeFontPadding = true
+    }
+    private val ctrTrack = FrameLayout(a)
+    private val ctrFill = View(a)
+    private val ctrPrev = actionButton(false)
+    private val ctrMain = actionButton(true)
+    private val ctrNext = actionButton(false)
+    private val ctrButtons = listOf(ctrPrev, ctrMain, ctrNext)
+    /** whose playback the centre shows (see HomeLogic.nextHeld) */
+    private var held = HomeLogic.Held()
+    private var ctrArt: Any? = null
 
     private val shade = View(a)
     /** the resting screen's own content (clock, date, pill, weather): it leaves while a panel is open, so nothing shows through the panel */
@@ -72,6 +93,17 @@ internal class DriftStyle(a: MainActivity) : HomeStyle(a) {
         }
     }
 
+    /** the centre looks again: a pause that has lasted long enough, or a track change that took a moment */
+    private val ctrLater = Runnable { refreshCentre() }
+    private val ctrTick = object : Runnable {
+        override fun run() {
+            if (destroyed || panel != NONE) return
+            val i = held.pkg?.let { NowPlaying.infoFor(it) } ?: return
+            paintProgress(i)
+            if (i.playing) a.handler.postDelayed(this, 1000)
+        }
+    }
+
     init {
         // the dark band behind the clock and the pill: darkest in the middle, lighter towards the edges
         root.addView(View(a).apply {
@@ -96,12 +128,8 @@ internal class DriftStyle(a: MainActivity) : HomeStyle(a) {
         pill.gravity = Gravity.CENTER_VERTICAL
         pill.isFocusable = true
         pill.isClickable = true
-        pill.setPadding(u(9), u(8), u(24), u(8))
-        pill.addView(label(13f, Color.rgb(20, 16, 36)).apply {
-            text = "▶"
-            gravity = Gravity.CENTER
-            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.WHITE) }
-        }, LinearLayout.LayoutParams(u(30), u(30)))
+        pill.setPadding(u(11), u(8), u(24), u(8))
+        pill.addView(pillIcon, LinearLayout.LayoutParams(u(30), u(30)))
         val txt = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL }
         pillTitle.maxWidth = u(460)
         pillSub.maxLines = 1
@@ -122,6 +150,40 @@ internal class DriftStyle(a: MainActivity) : HomeStyle(a) {
         }
         paintPill()
         center.addView(pill, LinearLayout.LayoutParams(-2, -2).apply { setMargins(0, u(30), 0, 0) })
+
+        // what plays
+        ctrCard.orientation = LinearLayout.HORIZONTAL
+        ctrCard.gravity = Gravity.CENTER_VERTICAL
+        ctrCard.clipChildren = false
+        ctrCard.clipToPadding = false
+        ctrCard.background = rounded(Color.argb(185, 26, 22, 42), u(22), maxOf(1, u(1)), Color.argb(90, 255, 255, 255))
+        ctrCard.setPadding(u(9), u(9), u(16), u(9))
+        ctrCard.visibility = View.GONE
+        ctrCover.scaleType = ImageView.ScaleType.CENTER_CROP
+        ctrCover.background = rounded(Color.argb(50, 255, 255, 255), u(13))
+        ctrCover.outlineProvider = android.view.ViewOutlineProvider.BACKGROUND
+        ctrCover.clipToOutline = true
+        ctrCard.addView(ctrCover, LinearLayout.LayoutParams(u(54), u(54)))
+        val what = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL }
+        what.addView(ctrCap, LinearLayout.LayoutParams(-1, -2))
+        what.addView(ctrTitle, LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, u(3), 0, 0) })
+        what.addView(ctrBy, LinearLayout.LayoutParams(-1, -2))
+        ctrTrack.background = rounded(Color.argb(70, 255, 255, 255), u(2))
+        ctrFill.background = rounded(a.accent, u(2))
+        ctrTrack.addView(ctrFill, FrameLayout.LayoutParams(2, -1))
+        what.addView(ctrTrack, LinearLayout.LayoutParams(-1, maxOf(3, u(3))).apply { setMargins(0, u(5), 0, 0) })
+        ctrCard.addView(what, LinearLayout.LayoutParams(u(CTR_TEXT), -2).apply { setMargins(u(12), 0, u(8), 0) })
+        for (b in ctrButtons) {
+            b.setPadding(u(14), u(9), u(14), u(9))
+            b.setOnKeyListener { v, k, ev -> centreKey(v, k, ev) }
+            ctrCard.addView(b, LinearLayout.LayoutParams(-2, -2).apply { setMargins(u(8), 0, 0, 0) })
+        }
+        ctrPrev.text = "⏮"
+        ctrNext.text = "⏭"
+        ctrPrev.setOnClickListener { held.pkg?.let { NowPlaying.prev(it) } }
+        ctrMain.setOnClickListener { held.pkg?.let { NowPlaying.playPause(it) } }
+        ctrNext.setOnClickListener { held.pkg?.let { NowPlaying.next(it) } }
+        center.addView(ctrCard, LinearLayout.LayoutParams(-2, -2).apply { setMargins(0, u(24), 0, 0) })
         root.addView(center, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { setMargins(0, u(104), 0, 0) })
         rest.add(center)
 
@@ -147,7 +209,38 @@ internal class DriftStyle(a: MainActivity) : HomeStyle(a) {
         root.addView(sheetHost, matchParent())
 
         refreshHeader()
-        NowPlaying.onChange = { if (!destroyed && panel == LEFT) fillNowPlaying(true) }
+        NowPlaying.onChange = {
+            if (!destroyed) {
+                refreshCentre()
+                if (panel == LEFT) fillNowPlaying(true)
+            }
+        }
+    }
+
+    private fun dirOf(k: Int) = when (k) {
+        KeyEvent.KEYCODE_DPAD_UP -> UP
+        KeyEvent.KEYCODE_DPAD_DOWN -> DOWN
+        KeyEvent.KEYCODE_DPAD_LEFT -> LEFT
+        KeyEvent.KEYCODE_DPAD_RIGHT -> RIGHT
+        else -> NONE
+    }
+
+    /**
+     * Arrows on the transport buttons: Left and Right walk the buttons and, past the last one, open that side's
+     * panel; Up and Down open theirs. A held key walks but never opens a panel.
+     */
+    private fun centreKey(v: View, k: Int, ev: KeyEvent): Boolean {
+        val dir = dirOf(k)
+        if (dir == NONE) return false
+        if (ev.action != KeyEvent.ACTION_DOWN) return true
+        val row = ctrButtons.filter { it.visibility == View.VISIBLE }
+        val i = row.indexOf(v)
+        when {
+            dir == LEFT && i > 0 -> row[i - 1].requestFocus()
+            dir == RIGHT && i >= 0 && i < row.size - 1 -> row[i + 1].requestFocus()
+            ev.repeatCount == 0 -> open(dir)
+        }
+        return true
     }
 
     private fun addHint(head: String, caption: String, where: Int, align: Int, captionFirst: Boolean) {
@@ -194,59 +287,145 @@ internal class DriftStyle(a: MainActivity) : HomeStyle(a) {
         wx2.visibility = if (wx2.text.isEmpty()) View.GONE else View.VISIBLE
     }
 
-    /** the pill: the newest title to continue, or the last-used app when no app has published one */
+    /** the pill: the app that was opened last. When that app has something to continue, OK continues it. */
     private fun refreshPill() {
-        val item = HomeLogic.newestResume(a.feed, apps.map { it.pkg })
-        val app = item?.let { a.appFor(it.pkg) }
-        if (item != null && app != null) {
-            pillTitle.setTitle(item.title)
-            pillSub.text = listOf(HomeLogic.leftText(item.leftMs), "OK to resume in " + app.label).filter { it.isNotEmpty() }.joinToString("  ·  ")
-            pill.setOnClickListener { a.openItem(item, app) }
-            return
-        }
-        val recent = a.store.recents.firstOrNull()?.let { k -> apps.firstOrNull { it.key == k } }
-        val e = recent ?: apps.firstOrNull()
+        val recents = a.store.recents
+        val key = HomeLogic.lastUsed(recents, apps.map { it.key })
+        val e = key?.let { k -> apps.firstOrNull { it.key == k } }
         if (e == null) {
+            pillIcon.visibility = View.GONE
             pillTitle.setTitle("No apps yet")
             pillSub.text = "press UP for the list"
             pill.setOnClickListener { open(UP) }
             return
         }
+        pillIcon.visibility = View.VISIBLE
+        pillIcon.setImageDrawable(e.icon)
+        // the app's name is always the headline; what it has to continue stands underneath
         pillTitle.setTitle(e.label)
-        pillSub.text = if (recent != null) "last used  ·  OK to open" else "OK to open"
+        val item = HomeLogic.resumeFor(a.feed, e.pkg)
+        if (item != null) {
+            pillSub.text = listOf("OK to continue " + HomeLogic.cutAtWord(item.title, 36), HomeLogic.leftText(item.leftMs))
+                .filter { it.isNotEmpty() }.joinToString("  ·  ")
+            pill.setOnClickListener { a.openItem(item, e) }
+            return
+        }
+        pillSub.text = if (key in recents) "last used  ·  OK to open" else "OK to open"
         pill.setOnClickListener { a.openApp(e) }
+    }
+
+    /**
+     * The centre: the buttons of what plays, otherwise the pill with the app that was opened last.
+     * Which playback it is, and how long something paused keeps the buttons: HomeLogic.nextHeld.
+     */
+    private fun refreshCentre() {
+        if (destroyed) return
+        a.handler.removeCallbacks(ctrLater)
+        a.handler.removeCallbacks(ctrTick)
+        val infos = LinkedHashMap<String, NowPlaying.Info>()
+        for (e in apps.distinctBy { it.pkg }) NowPlaying.infoFor(e.pkg)?.let { infos[e.pkg] = it }
+        val now = android.os.SystemClock.uptimeMillis()
+        held = HomeLogic.nextHeld(infos.filterValues { it.playing }.keys.toList(), infos.filterValues { !it.playing }.keys.toList(), held, now)
+        val pkg = held.pkg
+        val app = pkg?.let { p -> apps.firstOrNull { it.pkg == p } }
+        if (pkg == null || app == null) {
+            held = HomeLogic.Held()
+            refreshPill()
+            showCentre(false)
+            return
+        }
+        val info = infos[pkg]
+        if (info == null) {
+            // between two tracks: what is shown stays, and the centre looks again in a moment
+            a.handler.postDelayed(ctrLater, HomeLogic.GONE_GRACE_MS)
+            return
+        }
+        paintPlayback(app, info)
+        showCentre(true)
+        if (info.playing) a.handler.postDelayed(ctrTick, 1000)
+        else a.handler.postDelayed(ctrLater, (HomeLogic.PAUSED_KEEP_MS - (now - held.pausedAt)).coerceAtLeast(500) + 300)
+    }
+
+    private fun paintPlayback(app: AppEntry, info: NowPlaying.Info) {
+        ctrCap.text = (if (info.playing) "NOW PLAYING" else "PAUSED") + "  ·  " + app.label.uppercase(Locale.getDefault())
+        ctrTitle.setTitle(info.title)
+        ctrBy.text = info.subtitle()
+        ctrBy.visibility = if (ctrBy.text.isEmpty()) View.GONE else View.VISIBLE
+        val art: Any = info.art ?: app.icon
+        if (art !== ctrArt) {
+            ctrArt = art
+            if (info.art != null) { ctrCover.scaleType = ImageView.ScaleType.CENTER_CROP; ctrCover.setImageBitmap(info.art) }
+            else { ctrCover.scaleType = ImageView.ScaleType.CENTER_INSIDE; ctrCover.setImageDrawable(app.icon) }
+        }
+        ctrMain.text = if (info.playing) "❚❚" else "▶"
+        // a button that is about to leave must not hold the focus
+        if ((ctrPrev.isFocused && !info.canPrev) || (ctrNext.isFocused && !info.canNext)) ctrMain.requestFocus()
+        ctrPrev.visibility = if (info.canPrev) View.VISIBLE else View.GONE
+        ctrNext.visibility = if (info.canNext) View.VISIBLE else View.GONE
+        paintProgress(info)
+    }
+
+    private fun paintProgress(info: NowPlaying.Info) {
+        val f = info.fraction()
+        ctrTrack.visibility = if (f >= 0f) View.VISIBLE else View.INVISIBLE
+        if (f >= 0f) {
+            ctrFill.layoutParams.width = (u(CTR_TEXT) * f).toInt().coerceAtLeast(2)
+            ctrFill.requestLayout()
+        }
+    }
+
+    /** swaps the pill and the buttons; the focus follows when the centre had it */
+    private fun showCentre(playback: Boolean) {
+        if ((ctrCard.visibility == View.VISIBLE) == playback) return
+        val hadFocus = pill.isFocused || ctrButtons.any { it.isFocused }
+        (if (playback) ctrCard else pill).visibility = View.VISIBLE
+        if (hadFocus) (if (playback) ctrMain else pill).requestFocus()
+        (if (playback) pill else ctrCard).visibility = View.GONE
+    }
+
+    private fun focusCentre() {
+        if (ctrCard.visibility == View.VISIBLE) ctrMain.requestFocus() else pill.requestFocus()
+    }
+
+    /** while a panel is open nothing in the centre can take the focus */
+    private fun centreFocusable(on: Boolean) {
+        pill.isFocusable = on
+        for (b in ctrButtons) b.isFocusable = on
     }
 
     override fun bind(apps: List<AppEntry>, focusKey: String?) {
         this.apps = apps
         refreshHeader()
-        refreshPill()
+        refreshCentre()
         val again = if (android.os.SystemClock.uptimeMillis() - reopenAt < 3000) reopen else NONE
         reopen = NONE
         root.post {
             if (destroyed) return@post
             if (again != NONE) open(again, false)
-            else if (a.homeMayFocus()) { pill.requestFocus(); showHints() }
+            else if (a.homeMayFocus()) { focusCentre(); showHints() }
         }
     }
 
     override fun currentKey(): String? = null
 
     override fun refocus() {
-        if (panel != NONE) sheetFocus?.invoke() else pill.requestFocus()
+        if (panel != NONE) sheetFocus?.invoke() else focusCentre()
     }
 
     override fun home() {
         if (panel != NONE) close(false)
-        pill.requestFocus()
+        focusCentre()
         showHints()
     }
 
-    override fun onTick() = refreshHeader()
+    override fun onTick() {
+        refreshHeader()
+        refreshCentre()
+    }
     override fun onWeather() = refreshHeader()
 
     override fun onFeed() {
-        refreshPill()
+        if (ctrCard.visibility != View.VISIBLE) refreshPill()
         when (panel) {
             DOWN -> sheetLanes?.setLanes(a.lanes())
             LEFT -> sheetLanes?.setLanes(a.musicLanes())
@@ -272,6 +451,8 @@ internal class DriftStyle(a: MainActivity) : HomeStyle(a) {
         a.handler.removeCallbacks(fadeHints)
         a.handler.removeCallbacks(idle)
         a.handler.removeCallbacks(npTick)
+        a.handler.removeCallbacks(ctrLater)
+        a.handler.removeCallbacks(ctrTick)
         sheetLanes?.release()
         NowPlaying.onChange = null
     }
@@ -309,7 +490,7 @@ internal class DriftStyle(a: MainActivity) : HomeStyle(a) {
         }
         hideHints()
         sheetHost.addView(box, lp)
-        pill.isFocusable = false
+        centreFocusable(false)
         paintPill()
         if (animate) {
             when (dir) {
@@ -341,8 +522,9 @@ internal class DriftStyle(a: MainActivity) : HomeStyle(a) {
         npBars.clear()
         a.handler.removeCallbacks(idle)
         a.handler.removeCallbacks(npTick)
-        pill.isFocusable = true
-        if (a.homeMayFocus()) pill.requestFocus()
+        centreFocusable(true)
+        refreshCentre()
+        if (a.homeMayFocus()) focusCentre()
         paintPill()
         (box as? android.view.ViewGroup)?.descendantFocusability = android.view.ViewGroup.FOCUS_BLOCK_DESCENDANTS
         if (animate) {
@@ -598,6 +780,8 @@ internal class DriftStyle(a: MainActivity) : HomeStyle(a) {
         const val RIGHT = 4
         /** width of the side panels, in screen units */
         const val SIDE = 450
+        /** width of the title and artist next to the cover of what plays, in screen units */
+        const val CTR_TEXT = 270
         const val HINT_MS = 6000L
         const val PANEL_IDLE_MS = 30_000L
         const val MAIN = "main"

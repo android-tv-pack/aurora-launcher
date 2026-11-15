@@ -921,7 +921,7 @@ class MainActivity : Activity() {
             if (first == null) first = line
         }
         col.addView(TextView(this).apply {
-            text = "Aurora 3.18  ·  free, no ads, no account"
+            text = "Aurora 3.19  ·  free, no ads, no account"
             setTextSize(TypedValue.COMPLEX_UNIT_PX, u(10).toFloat())
             setTextColor(Color.argb(110, 255, 255, 255))
             setPadding(u(6), u(10), 0, 0)

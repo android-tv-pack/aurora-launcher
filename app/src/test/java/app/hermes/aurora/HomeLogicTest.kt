@@ -61,12 +61,12 @@ class HomeLogicTest {
         val feed = mapOf("a" to listOf(item("a", "only suggestions")))
         val lane = HomeLogic.crossLane(feed, listOf("a"))
         assertEquals(HomeLogic.TITLE_SPARSE, HomeLogic.crossTitle(lane))
-        assertNull(HomeLogic.newestResume(feed, listOf("a")))
+        assertNull(HomeLogic.resumeFor(feed, "a"))
     }
 
     @Test fun progressAloneCountsAsResume() {
         val feed = mapOf("a" to listOf(item("a", "plain"), item("a", "half seen", 0.5f)))
-        assertEquals("half seen", HomeLogic.newestResume(feed, listOf("a"))?.title)
+        assertEquals("half seen", HomeLogic.resumeFor(feed, "a")?.title)
     }
 
     @Test fun appsTheUserDoesNotHaveAreLeftOut() {
@@ -113,6 +113,74 @@ class HomeLogicTest {
         assertEquals("1 min left", HomeLogic.leftText(20_000L))
         assertEquals("1 h 5 min left", HomeLogic.leftText(65 * 60_000L))
         assertEquals("", HomeLogic.leftText(0))
+    }
+
+    // ---- the centre of Drift
+
+    @Test fun theAppOpenedLastIsTheDefault() {
+        val keys = listOf("kino/Main", "spotify/Main", "youtube/Main")
+        assertEquals("spotify/Main", HomeLogic.lastUsed(listOf("spotify/Main", "kino/Main"), keys))
+        // an app that was hidden or removed since is skipped
+        assertEquals("youtube/Main", HomeLogic.lastUsed(listOf("gone/Main", "youtube/Main"), keys))
+        // nothing opened yet: the first app of the home
+        assertEquals("kino/Main", HomeLogic.lastUsed(emptyList(), keys))
+        assertNull(HomeLogic.lastUsed(listOf("spotify/Main"), emptyList()))
+    }
+
+    @Test fun onlyTheAppsOwnNewestTitleIsOfferedToContinue() {
+        val feed = mapOf(
+            "kino" to listOf(item("kino", "older", 0.3f, engaged = 10, watchNext = true), item("kino", "newer", 0.5f, engaged = 20, watchNext = true), item("kino", "a tip")),
+            "spotify" to listOf(item("spotify", "Mix", square = true))
+        )
+        assertEquals("newer", HomeLogic.resumeFor(feed, "kino")?.title)
+        // the film waiting in another app is not offered on the pill of the app that was opened last
+        assertNull(HomeLogic.resumeFor(feed, "spotify"))
+        assertNull(HomeLogic.resumeFor(feed, "not installed"))
+    }
+
+    @Test fun whatPlaysTakesTheCentre() {
+        val none = HomeLogic.Held()
+        assertNull(HomeLogic.nextHeld(emptyList(), emptyList(), none, 1000).pkg)
+        assertEquals("spotify", HomeLogic.nextHeld(listOf("spotify"), emptyList(), none, 1000).pkg)
+        // two apps play at once: the one already shown stays
+        assertEquals("vlc", HomeLogic.nextHeld(listOf("spotify", "vlc"), emptyList(), HomeLogic.Held("vlc"), 1000).pkg)
+        // the one shown was paused and another one plays: the centre follows what plays
+        assertEquals("spotify", HomeLogic.nextHeld(listOf("spotify"), listOf("vlc"), HomeLogic.Held("vlc"), 1000).pkg)
+    }
+
+    @Test fun somethingPausedBeforeTheHomeCameUpDoesNotTakeTheCentre() {
+        assertNull(HomeLogic.nextHeld(emptyList(), listOf("spotify"), HomeLogic.Held(), 1000).pkg)
+    }
+
+    @Test fun pausingKeepsTheButtonsForAWhileThenTheAppComesBack() {
+        var h = HomeLogic.nextHeld(listOf("spotify"), emptyList(), HomeLogic.Held(), 1000)
+        h = HomeLogic.nextHeld(emptyList(), listOf("spotify"), h, 5000)
+        assertEquals("spotify", h.pkg)
+        assertEquals(5000L, h.pausedAt)
+        h = HomeLogic.nextHeld(emptyList(), listOf("spotify"), h, 5000 + HomeLogic.PAUSED_KEEP_MS - 1)
+        assertEquals("spotify", h.pkg)
+        assertEquals(5000L, h.pausedAt)
+        // playing again starts the count afresh
+        val again = HomeLogic.nextHeld(listOf("spotify"), emptyList(), h, 9000)
+        assertEquals("spotify", again.pkg)
+        assertEquals(0L, again.pausedAt)
+        // still paused when the time is up: the centre goes back to the app that was opened last
+        assertNull(HomeLogic.nextHeld(emptyList(), listOf("spotify"), h, 5000 + HomeLogic.PAUSED_KEEP_MS).pkg)
+    }
+
+    @Test fun aTrackChangeDoesNotGiveTheCentreAway() {
+        var h = HomeLogic.Held("spotify")
+        // neither playing nor paused for a moment
+        h = HomeLogic.nextHeld(emptyList(), emptyList(), h, 1000)
+        assertEquals("spotify", h.pkg)
+        assertEquals(1000L, h.goneAt)
+        assertEquals("spotify", HomeLogic.nextHeld(emptyList(), emptyList(), h, 1000 + HomeLogic.GONE_GRACE_MS - 1).pkg)
+        // the next track plays: all is as before
+        val next = HomeLogic.nextHeld(listOf("spotify"), emptyList(), h, 1400)
+        assertEquals("spotify", next.pkg)
+        assertEquals(0L, next.goneAt)
+        // it never came back: the playback has ended
+        assertNull(HomeLogic.nextHeld(emptyList(), emptyList(), h, 1000 + HomeLogic.GONE_GRACE_MS).pkg)
     }
 
     // ---- night hours

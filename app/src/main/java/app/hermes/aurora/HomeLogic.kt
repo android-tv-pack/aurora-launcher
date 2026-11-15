@@ -2,8 +2,8 @@ package app.hermes.aurora
 
 /**
  * The parts of the home screen that are plain logic (no Android classes), so they run in JVM unit tests:
- * style migration, the lanes built from what apps publish, the night-dimming window, pinned titles
- * and cutting long titles at a word.
+ * style migration, the lanes built from what apps publish, what the centre of Drift holds,
+ * the night-dimming window, pinned titles and cutting long titles at a word.
  */
 internal object HomeLogic {
 
@@ -103,9 +103,50 @@ internal object HomeLogic {
         if (covers.isEmpty() || name == null) null else Lane(name, covers.take(perLane), false)
     }
 
-    /** the newest thing to continue, or null when no app has published one */
-    fun newestResume(feed: Map<String, List<TvFeed.Item>>, appOrder: List<String>): TvFeed.Item? =
-        crossLane(feed, appOrder, 1).firstOrNull { it.resume }
+    // ---------------------------------------------------------------- the centre of Drift
+
+    /** The app that was opened last among the apps on the home ([keys], in the home's order); the first app when none was. */
+    fun lastUsed(recents: List<String>, keys: List<String>): String? =
+        recents.firstOrNull { it in keys } ?: keys.firstOrNull()
+
+    /** the newest thing of the app [pkg] to continue, or null when that app has published none */
+    fun resumeFor(feed: Map<String, List<TvFeed.Item>>, pkg: String): TvFeed.Item? =
+        feed[pkg].orEmpty().filter { it.resume }.maxByOrNull { it.engaged }
+
+    /** how long the buttons of something that was paused stay in the centre */
+    const val PAUSED_KEEP_MS = 5 * 60_000L
+    /** between two tracks an app reports neither "playing" nor "paused" for a moment */
+    const val GONE_GRACE_MS = 1_500L
+
+    /**
+     * Whose playback the centre shows: [pkg] (null = none, the centre shows the last-used app), when that playback
+     * was first seen paused and when it was first seen gone (0 = it is not).
+     */
+    class Held(val pkg: String? = null, val pausedAt: Long = 0L, val goneAt: Long = 0L)
+
+    /**
+     * The next state of the centre. [playing] and [paused] are the apps that play or are paused right now, in the
+     * home's order; [was] is what the centre held until now.
+     * Something that plays always takes the centre. Something paused only keeps it: its buttons stay when they were
+     * already there (pausing from the home must not take the Play button away), for PAUSED_KEEP_MS. An app that was
+     * paused before the home came up never takes the centre.
+     */
+    fun nextHeld(playing: List<String>, paused: List<String>, was: Held, now: Long): Held {
+        val p = was.pkg
+        return when {
+            p != null && p in playing -> Held(p)
+            playing.isNotEmpty() -> Held(playing.first())
+            p == null -> Held()
+            p in paused -> {
+                val since = if (was.pausedAt == 0L) now else was.pausedAt
+                if (now - since < PAUSED_KEEP_MS) Held(p, since) else Held()
+            }
+            else -> {
+                val since = if (was.goneAt == 0L) now else was.goneAt
+                if (now - since < GONE_GRACE_MS) Held(p, was.pausedAt, since) else Held()
+            }
+        }
+    }
 
     /** "38 min left", "1 h 5 min left", or "" when the length is unknown */
     fun leftText(leftMs: Long): String {

@@ -5,7 +5,7 @@ It is a personal project, built and tested on a Xiaomi TV Box S (3rd gen, Androi
 
 - **Two home styles:**
   - **Cinema**: the app in focus drives the whole screen: its newest title fills the backdrop, with Resume / Play and Open, "More from" cards, and a slim dock of apps at the bottom.
-  - **Drift**: almost nothing on screen. The scene, a large thin clock, the weather and one pill that resumes the newest title (or opens the last-used app). Up, Left, Down and Right slide a panel in: apps, music, watch, pins. Back, or half a minute without a key press, sends it away again.
+  - **Drift**: almost nothing on screen. The scene, a large thin clock, the weather and one pill with the app you opened last (OK opens it, or continues what that app has to continue). While something plays, the pill gives its place to what plays: cover, title and the previous / play-pause / next buttons. Up, Left, Down and Right slide a panel in: apps, music, watch, pins. Back, or half a minute without a key press, sends it away again.
 - **Pins:** hold OK on an app or on a title and choose Pin. Pinned apps come first; pinned titles get their own lane, and both wait in Drift's pins panel.
 - **Night dimming:** at night (23:00 to 07:00, or hours you choose, or off) the home is dimmed; any key brightens it for a few seconds.
 - Themes and six icon styles (Original, Round, Mono, Neon, Duotone, Glass), all generated on the device. App names are always shown next to the icons.
