@@ -40,6 +40,9 @@ internal class CinemaStyle(a: MainActivity) : HomeStyle(a) {
         maxLines = 2
         ellipsize = TextUtils.TruncateAt.END
     }
+    /** with extra artwork on: the title's logo (in place of the title text) and a line with year, genres, rating */
+    private val logo = ImageView(a).apply { scaleType = ImageView.ScaleType.FIT_START; adjustViewBounds = true; visibility = View.GONE }
+    private val meta = label(12f, Color.argb(225, 255, 255, 255), "sans-serif-medium", 0.04f).apply { maxLines = 1; visibility = View.GONE }
     private val desc = label(13f, Color.argb(210, 255, 255, 255)).apply {
         maxLines = 2
         ellipsize = TextUtils.TruncateAt.END
@@ -111,7 +114,9 @@ internal class CinemaStyle(a: MainActivity) : HomeStyle(a) {
         // hero text
         val hero = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL }
         hero.addView(kicker)
+        hero.addView(logo, LinearLayout.LayoutParams(u(300), u(78)).apply { setMargins(0, u(12), 0, u(10)) })
         hero.addView(title, LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, u(8), 0, u(6)) })
+        hero.addView(meta, LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 0, 0, u(6)) })
         hero.addView(desc)
         track.setBackgroundColor(Color.argb(60, 255, 255, 255))
         track.addView(fill, FrameLayout.LayoutParams(0, -1))
@@ -162,6 +167,7 @@ internal class CinemaStyle(a: MainActivity) : HomeStyle(a) {
 
     private fun showNowPlaying(e: AppEntry, np: NowPlaying.Info) {
         shown = null
+        clearExtra()
         kicker.text = (if (np.playing) "NOW PLAYING" else "PAUSED") + "  ·  " + e.label.uppercase(Locale.getDefault())
         kicker.setTextColor(a.accent)
         title.text = np.title
@@ -338,8 +344,30 @@ internal class CinemaStyle(a: MainActivity) : HomeStyle(a) {
         if (items.isEmpty()) showPlain(e) else showItem(items[0], e)
     }
 
+    /** back to what the app itself published: title as text, no logo, no extra line */
+    private fun clearExtra() {
+        logo.visibility = View.GONE
+        logo.setImageDrawable(null)
+        title.visibility = View.VISIBLE
+        meta.visibility = View.GONE
+    }
+
+    /** TMDB's logo, line and description for the item on screen (its backdrop is handled where the picture loads) */
+    private fun applyExtra(item: TvFeed.Item, x: Tmdb.Extra) {
+        if (x.meta.isNotEmpty()) { meta.text = x.meta; meta.visibility = View.VISIBLE }
+        if (x.overview.isNotEmpty()) { desc.text = x.overview; desc.visibility = View.VISIBLE }
+        val l = x.logo ?: return
+        Images.load(a, l, 600) { bmp ->
+            if (shown !== item || bmp == null) return@load
+            logo.setImageBitmap(bmp)
+            logo.visibility = View.VISIBLE
+            title.visibility = View.GONE
+        }
+    }
+
     private fun showPlain(e: AppEntry) {
         shown = null
+        clearExtra()
         kicker.text = "APP"
         kicker.setTextColor(a.accent)
         title.text = e.label
@@ -353,6 +381,7 @@ internal class CinemaStyle(a: MainActivity) : HomeStyle(a) {
 
     private fun showItem(item: TvFeed.Item, e: AppEntry) {
         shown = item
+        clearExtra()
         if (!item.square) { cover.visibility = View.GONE; lastAmbient = null }
         kicker.text = item.kind + "  ·  " + e.label.uppercase(Locale.getDefault())
         kicker.setTextColor(a.accent)
@@ -372,11 +401,25 @@ internal class CinemaStyle(a: MainActivity) : HomeStyle(a) {
         openBtn.setOnClickListener { a.openApp(e) }
         openBtn.visibility = View.VISIBLE
 
-        val url = item.art
+        // extra artwork (optional): what is already known paints at once; otherwise the app's own picture shows
+        // first and TMDB's replaces it when the answer arrives
+        val known = Tmdb.known(a, a.store, item)
+        if (known != null) applyExtra(item, known)
+        else Tmdb.lookup(a, a.store, item) { x ->
+            if (shown !== item || x == null) return@lookup
+            applyExtra(item, x)
+            x.backdrop?.let { loadArt(item, it, null) }
+        }
+        loadArt(item, known?.backdrop ?: item.art, if (known?.backdrop != null) item.art else null)
+    }
+
+    /** the item's picture: full screen for a title, a cover card for music. [fallback] is tried when [url] does not load. */
+    private fun loadArt(item: TvFeed.Item, url: String, fallback: String?) {
         if (BuildConfig.DEBUG) android.util.Log.d("AuroraArt", "show ${item.pkg}: $url")
         // a title's picture fills the screen: decode it at the screen's full width, never smaller
         Images.load(a, url, if (item.square) 640 else a.resources.displayMetrics.widthPixels.coerceAtLeast(1280)) { bmp ->
-            if (shown !== item || bmp == null) return@load
+            if (shown !== item) return@load
+            if (bmp == null) { if (fallback != null) loadArt(item, fallback, null); return@load }
             if (item.square) {
                 // a playlist / album cover: cover card + the cover's colours as a soft wash
                 cover.setImageBitmap(bmp)

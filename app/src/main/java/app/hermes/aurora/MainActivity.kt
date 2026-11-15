@@ -182,6 +182,7 @@ class MainActivity : Activity() {
         })
         NowPlaying.start(this)
         AdBlock.ensure(this, store)
+        if (Tmdb.takeDroppedKey(this, store)) dirty = true
         lastInteraction = android.os.SystemClock.elapsedRealtime()
         handler.removeCallbacks(saverTick)
         handler.postDelayed(saverTick, 10_000)
@@ -859,6 +860,10 @@ class MainActivity : Activity() {
             Row("Pause music when another app opens", { onOff(store.pauseOnSwitch) }) {
                 store.pauseOnSwitch = !store.pauseOnSwitch
             },
+            Row("Extra artwork (TMDB)", { Tmdb.label(store) }) {
+                if (store.tmdbKey.isEmpty() || Tmdb.keyRefused) askTmdbKey()
+                else { store.tmdb = !store.tmdb; currentStyle?.onFeed(); render(null) }
+            },
             Row("Ad blocker", { AdBlock.label(this, store) }) { d ->
                 AdBlock.choose(this, store, (store.adblock + d + 2) % 2)
                 // the count and the state change in the background: show them while the panel is open
@@ -993,6 +998,38 @@ class MainActivity : Activity() {
             .setView(holder)
             .setPositiveButton("Save") { _, _ -> applyCity(input.text.toString()) }
             .setNeutralButton("Auto-detect") { _, _ -> applyCity("") }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    /** TMDB needs the user's own free key; typed here, or dropped as a file (see Tmdb.takeDroppedKey) */
+    private fun askTmdbKey() {
+        val input = EditText(this).apply {
+            setText(store.tmdbKey)
+            hint = "TMDB API key"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            setSingleLine(true)
+        }
+        val holder = FrameLayout(this).apply { setPadding(u(24), u(8), u(24), 0); addView(input) }
+        dialogBuilder()
+            .setTitle("Extra artwork from TMDB")
+            .setMessage("Clean backdrops, title logos and short descriptions for films and series from any app. " +
+                "It needs your own free API key from themoviedb.org (Settings > API). The titles on your home screen are sent to TMDB to find them.\n\n" +
+                "This product uses the TMDB API but is not endorsed or certified by TMDB.")
+            .setView(holder)
+            .setPositiveButton("Save") { _, _ ->
+                val k = input.text.toString().trim()
+                store.tmdbKey = k
+                store.tmdb = k.isNotEmpty()
+                Tmdb.keyRefused = false
+                refreshPanel?.invoke()
+                if (k.isNotEmpty()) Tmdb.check(k) { ok ->
+                    Toast.makeText(this, when (ok) { true -> "TMDB artwork is on"; false -> "TMDB did not accept this key"; else -> "Could not reach TMDB to check the key" }, Toast.LENGTH_LONG).show()
+                    refreshPanel?.invoke()
+                    if (ok == true) render(null)
+                }
+            }
+            .setNeutralButton("Turn off") { _, _ -> store.tmdb = false; refreshPanel?.invoke(); render(null) }
             .setNegativeButton("Cancel", null)
             .show()
     }

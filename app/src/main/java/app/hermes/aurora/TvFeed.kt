@@ -30,7 +30,11 @@ object TvFeed {
         /** it comes from Android TV's Watch Next list, not from an app's own suggestions */
         val watchNext: Boolean = false,
         /** milliseconds left to watch, 0 when unknown */
-        val leftMs: Long = 0L
+        val leftMs: Long = 0L,
+        /** what the app says the item is (Android TV's program type: 0 film, 1 series, 2 season, 3 episode, 4 clip ...), -1 when it does not say */
+        val type: Int = -1,
+        /** the year the app states for it, 0 when it states none */
+        val year: Int = 0
     ) {
         /** something the viewer can pick up again */
         val resume: Boolean get() = watchNext || progress > 0f
@@ -60,6 +64,8 @@ object TvFeed {
                     val iPos = col("last_playback_position_millis")
                     val iDur = col("duration_millis")
                     val iEng = col("last_engagement_time_utc_millis")
+                    val iType = col("type")
+                    val iDate = col("release_date")
                     if (iPkg < 0 || iTitle < 0) return
                     while (c.moveToNext()) {
                         val pkg = c.getString(iPkg) ?: continue
@@ -94,7 +100,9 @@ object TvFeed {
                         out.getOrPut(pkg) { ArrayList() }
                             .add(Item(pkg, title, desc, art, land, squareArt, musicKind ?: kindOf(c), intentUri, progress,
                                 if (iEng >= 0 && !c.isNull(iEng)) c.getLong(iEng) else 0L, watchNext,
-                                if (progress >= 0f) (dur - pos).coerceAtLeast(0L) else 0L))
+                                if (progress >= 0f) (dur - pos).coerceAtLeast(0L) else 0L,
+                                if (iType >= 0 && !c.isNull(iType)) c.getInt(iType) else -1,
+                                if (iDate >= 0 && !c.isNull(iDate)) c.getString(iDate)?.take(4)?.toIntOrNull() ?: 0 else 0))
                     }
                 }
             } catch (e: Exception) {

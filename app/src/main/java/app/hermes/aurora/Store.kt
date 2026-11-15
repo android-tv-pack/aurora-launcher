@@ -88,6 +88,15 @@ class Store(ctx: Context) {
         get() = p.getInt("adblock", 0).coerceIn(0, 1)
         set(v) { p.edit().putInt("adblock", v).apply() }
 
+    /** extra artwork from TMDB: off unless the user turns it on and gives a key */
+    var tmdb: Boolean
+        get() = p.getBoolean("tmdb", false)
+        set(v) { p.edit().putBoolean("tmdb", v).apply() }
+    /** the user's own TMDB API key; kept out of the settings backup */
+    var tmdbKey: String
+        get() = p.getString("tmdbKey", "") ?: ""
+        set(v) { p.edit().putString("tmdbKey", v.trim()).apply() }
+
     var pauseOnSwitch: Boolean
         get() = p.getBoolean("pauseOnSwitch", true)
         set(v) { p.edit().putBoolean("pauseOnSwitch", v).apply() }
@@ -108,7 +117,7 @@ class Store(ctx: Context) {
         set(v) { p.edit().putInt("saverMode", v).apply() }
 
     // ---- backup / restore of the settings (not the weather cache)
-    private val skip = setOf("lat", "lon", "geoFor", "place", "wTemp", "wHi", "wLo", "wCode", "wDay", "wTime", "recents", "askedTv", "adblock")
+    private val skip = setOf("lat", "lon", "geoFor", "place", "wTemp", "wHi", "wLo", "wCode", "wDay", "wTime", "recents", "askedTv", "adblock", "tmdbKey")
     private var backupListener: android.content.SharedPreferences.OnSharedPreferenceChangeListener? = null
 
     fun exportJson(): String {
