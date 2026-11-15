@@ -83,6 +83,11 @@ class Store(ctx: Context) {
         set(v) { p.edit().putString("pins", HomeLogic.encodePins(v)).apply() }
 
     /** pause a playing music/video app when another app comes to the front */
+    /** the ad blocker: 0 = off, 1 = on */
+    var adblock: Int
+        get() = p.getInt("adblock", 0).coerceIn(0, 1)
+        set(v) { p.edit().putInt("adblock", v).apply() }
+
     var pauseOnSwitch: Boolean
         get() = p.getBoolean("pauseOnSwitch", true)
         set(v) { p.edit().putBoolean("pauseOnSwitch", v).apply() }
@@ -103,7 +108,7 @@ class Store(ctx: Context) {
         set(v) { p.edit().putInt("saverMode", v).apply() }
 
     // ---- backup / restore of the settings (not the weather cache)
-    private val skip = setOf("lat", "lon", "geoFor", "place", "wTemp", "wHi", "wLo", "wCode", "wDay", "wTime", "recents", "askedTv")
+    private val skip = setOf("lat", "lon", "geoFor", "place", "wTemp", "wHi", "wLo", "wCode", "wDay", "wTime", "recents", "askedTv", "adblock")
     private var backupListener: android.content.SharedPreferences.OnSharedPreferenceChangeListener? = null
 
     fun exportJson(): String {

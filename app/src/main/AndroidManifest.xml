@@ -53,6 +53,16 @@
         android:label="@string/app_name"
         android:theme="@style/Theme.Aurora">
 
+        <!-- the ad blocker: only DNS lookups pass through it (see AdBlock.kt) -->
+        <service
+            android:name=".AdBlockService"
+            android:exported="false"
+            android:permission="android.permission.BIND_VPN_SERVICE">
+            <intent-filter>
+                <action android:name="android.net.VpnService" />
+            </intent-filter>
+        </service>
+
         <service
             android:name=".MediaListener"
             android:exported="true"

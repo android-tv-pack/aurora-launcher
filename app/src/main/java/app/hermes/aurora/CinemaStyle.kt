@@ -77,7 +77,7 @@ internal class CinemaStyle(a: MainActivity) : HomeStyle(a) {
         root.addView(backdrop, matchParent())
 
         val left = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
-            intArrayOf(Color.argb(230, 0, 0, 0), Color.argb(130, 0, 0, 0), Color.argb(20, 0, 0, 0)))
+            intArrayOf(Color.argb(215, 0, 0, 0), Color.argb(90, 0, 0, 0), Color.argb(0, 0, 0, 0)))
         val bottom = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP,
             intArrayOf(Color.argb(245, 0, 0, 0), Color.argb(170, 0, 0, 0), Color.argb(0, 0, 0, 0)))
         scrim.background = LayerDrawable(arrayOf(left, bottom))
@@ -199,6 +199,7 @@ internal class CinemaStyle(a: MainActivity) : HomeStyle(a) {
         if (art === lastAmbient && backdrop.visibility == View.VISIBLE) return
         lastAmbient = art
         lastBackdrop = null
+        a.setBackdropCovers(false)      // a colour wash lets the scene show through
         // halve repeatedly: every step averages 2x2 pixels, so details melt into a clean colour wash
         var tiny = art
         while (tiny.width > 8) tiny = android.graphics.Bitmap.createScaledBitmap(tiny, tiny.width / 2, tiny.height / 2, true)
@@ -266,7 +267,7 @@ internal class CinemaStyle(a: MainActivity) : HomeStyle(a) {
     override fun onTick() = refreshHeader()
     override fun onWeather() = refreshHeader()
     override fun onFeed() { current?.let { showApp(it) } }
-    override fun destroy() { a.handler.removeCallbacks(bindRunnable); a.handler.removeCallbacks(npTick); NowPlaying.onChange = null }
+    override fun destroy() { a.setBackdropCovers(false); a.handler.removeCallbacks(bindRunnable); a.handler.removeCallbacks(npTick); NowPlaying.onChange = null }
 
     private fun refreshHeader() {
         clock.text = a.nowStr(a.clockPattern())
@@ -372,7 +373,8 @@ internal class CinemaStyle(a: MainActivity) : HomeStyle(a) {
         openBtn.visibility = View.VISIBLE
 
         val url = item.art
-        Images.load(a, url, if (item.square) 640 else 1280) { bmp ->
+        // a title's picture fills the screen: decode it at the screen's full width, never smaller
+        Images.load(a, url, if (item.square) 640 else a.resources.displayMetrics.widthPixels.coerceAtLeast(1280)) { bmp ->
             if (shown !== item || bmp == null) return@load
             if (item.square) {
                 // a playlist / album cover: cover card + the cover's colours as a soft wash
@@ -380,13 +382,14 @@ internal class CinemaStyle(a: MainActivity) : HomeStyle(a) {
                 cover.visibility = View.VISIBLE
                 // the visualiser is the backdrop while it runs: a colour wash on top would dim it
                 if (a.viz.live) { hideBackdrop(); lastAmbient = null } else setAmbient(bmp)
-            } else if (a.viz.live) hideBackdrop() else setBackdrop(bmp)
+            } else if (a.viz.hearing) hideBackdrop() else setBackdrop(bmp)     // the artwork wins over a scene; only music playing takes the screen back
         }
     }
 
     private fun setBackdrop(bmp: android.graphics.Bitmap) {
         if (bmp === lastBackdrop && backdrop.visibility == View.VISIBLE) return
         lastBackdrop = bmp
+        a.setBackdropCovers(true)       // the scene stops drawing behind the picture
         val wide = bmp.width >= bmp.height * 1.25f
         backdrop.scaleType = if (wide) ImageView.ScaleType.CENTER_CROP else ImageView.ScaleType.FIT_END
         backdrop.setPadding(0, 0, if (wide) 0 else u(70), 0)
@@ -406,6 +409,8 @@ internal class CinemaStyle(a: MainActivity) : HomeStyle(a) {
     }
 
     private fun hideBackdrop() {
+        a.setBackdropCovers(false)
+        lastBackdrop = null
         if (backdrop.visibility != View.VISIBLE) return
         backdrop.animate().alpha(0f).setDuration(240).withEndAction { backdrop.visibility = View.GONE }.start()
         scrim.animate().alpha(0f).setDuration(240).withEndAction { scrim.visibility = View.GONE }.start()

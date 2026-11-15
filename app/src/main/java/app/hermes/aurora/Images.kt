@@ -16,7 +16,8 @@ import java.util.concurrent.Executors
 object Images {
     private val pool = Executors.newFixedThreadPool(2)
     private val main = Handler(Looper.getMainLooper())
-    private val cache = object : LruCache<String, Bitmap>(20 * 1024 * 1024) {
+    // room for a few full-screen backdrops (a 1920 x 1080 picture is about 8 MB)
+    private val cache = object : LruCache<String, Bitmap>(40 * 1024 * 1024) {
         override fun sizeOf(key: String, value: Bitmap) = value.byteCount
     }
 
@@ -38,10 +39,39 @@ object Images {
         }
     }
 
+    /**
+     * Apps publish small pictures (a phone-sized 460 px still, a 640 px video frame) although their servers keep
+     * the same picture much larger. For a full-screen backdrop ask for the large one first; the published address
+     * stays the fallback. Known: Yandex/Kinopoisk CDNs take the size as the last path part, YouTube has
+     * maxresdefault next to sd/hq/mqdefault, TMDB (used by many apps) takes the width in the path.
+     */
+    internal fun sharper(url: String, maxWidth: Int): String? {
+        if (maxWidth < 1280) return null
+        val yandex = Regex("""^(https://[^/]*yandex\.net/.+)/\d+x\d*$""").find(url)
+        if (yandex != null) return yandex.groupValues[1] + "/1920x1080"
+        val yt = Regex("""^(https://i\d?\.ytimg\.com/vi(?:_webp)?/[^/]+/)(?:default|mqdefault|hqdefault|sddefault|hq720)(\.jpg|\.webp)(\?.*)?$""").find(url)
+        if (yt != null) return yt.groupValues[1] + "maxresdefault" + yt.groupValues[2]
+        val tmdb = Regex("""^(https://image\.tmdb\.org/t/p/)w\d+(/.+)$""").find(url)
+        if (tmdb != null) return tmdb.groupValues[1] + "w1280" + tmdb.groupValues[2]
+        return null
+    }
+
     private fun fetch(ctx: Context, url: String, maxWidth: Int): Bitmap? {
+        val big = sharper(url, maxWidth)
+        if (big != null) {
+            val b = try { decode(ctx, big, maxWidth) } catch (e: Throwable) { null }
+            // a YouTube video without a large frame answers with a small grey placeholder
+            if (b != null && b.width >= 1000) return b
+            b?.recycle()
+        }
+        return decode(ctx, url, maxWidth)
+    }
+
+    private fun decode(ctx: Context, url: String, maxWidth: Int): Bitmap? {
         val bytes = readAll(ctx, url) ?: return null
         val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, o)
+        if (BuildConfig.DEBUG || maxWidth >= 1280) android.util.Log.d("AuroraArt", "${o.outWidth}x${o.outHeight} for $maxWidth: $url")
         var sample = 1
         while (o.outWidth / (sample * 2) >= maxWidth) sample *= 2
         val d = BitmapFactory.Options().apply { inSampleSize = sample }

@@ -451,6 +451,8 @@ internal class VisualizerView(private val a: MainActivity) : View(a) {
 
     /** true while the visualiser owns the background: real audio, or a scene (which also runs without music) */
     val live: Boolean get() = active && (!idle || isScene(mode()))
+    /** true only while it reacts to real audio (a scene running without music is not) */
+    val hearing: Boolean get() = active && !idle
 
     private val fillP = Paint(Paint.ANTI_ALIAS_FLAG)
     private val crest = Path()

@@ -181,6 +181,7 @@ class MainActivity : Activity() {
             addDataScheme("package")
         })
         NowPlaying.start(this)
+        AdBlock.ensure(this, store)
         lastInteraction = android.os.SystemClock.elapsedRealtime()
         handler.removeCallbacks(saverTick)
         handler.postDelayed(saverTick, 10_000)
@@ -206,6 +207,15 @@ class MainActivity : Activity() {
         if (ambientOn) exitAmbient()
         viz.stop()
         NowPlaying.stop()
+    }
+
+    @Deprecated("the platform's own result callback; Aurora has no AndroidX")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == AdBlock.REQUEST) {
+            AdBlock.onPermission(this, store, resultCode == RESULT_OK)
+            for (t in longArrayOf(300, 2000)) handler.postDelayed({ refreshPanel?.invoke() }, t)
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -848,6 +858,11 @@ class MainActivity : Activity() {
             },
             Row("Pause music when another app opens", { onOff(store.pauseOnSwitch) }) {
                 store.pauseOnSwitch = !store.pauseOnSwitch
+            },
+            Row("Ad blocker", { AdBlock.label(this, store) }) { d ->
+                AdBlock.choose(this, store, (store.adblock + d + 2) % 2)
+                // the count and the state change in the background: show them while the panel is open
+                for (t in longArrayOf(1500, 4000)) handler.postDelayed({ refreshPanel?.invoke() }, t)
             },
             Row("Settings backup", { backupLabel() }) { askBackup() },
             Row("Hidden apps", { "${store.hidden.size}" }) { askHidden() }
