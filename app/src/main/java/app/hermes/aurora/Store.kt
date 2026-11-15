@@ -121,6 +121,11 @@ class Store(ctx: Context) {
         get() = list("previewsAsked")
         set(v) { putList("previewsAsked", v.distinct()) }
 
+    /** the package of the user's music app, "" = chosen automatically */
+    var musicApp: String
+        get() = p.getString("musicApp", "") ?: ""
+        set(v) { p.edit().putString("musicApp", v).apply() }
+
     /** the tab Customize was left on */
     var settingsTab: Int
         get() = p.getInt("settingsTab", 0)

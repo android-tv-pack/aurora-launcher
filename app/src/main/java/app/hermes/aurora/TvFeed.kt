@@ -34,7 +34,9 @@ object TvFeed {
         /** what the app says the item is (Android TV's program type: 0 film, 1 series, 2 season, 3 episode, 4 clip ...), -1 when it does not say */
         val type: Int = -1,
         /** the year the app states for it, 0 when it states none */
-        val year: Int = 0
+        val year: Int = 0,
+        /** the name of the row the app published it in ("Recently played", "Your playlists" ...), "" when unknown */
+        val shelf: String = ""
     ) {
         /** something the viewer can pick up again */
         val resume: Boolean get() = watchNext || progress > 0f
@@ -50,6 +52,13 @@ object TvFeed {
         val out = LinkedHashMap<String, MutableList<Item>>()
         if (!allowed(ctx)) return out
         val seen = HashSet<String>()
+        // the rows ("channels") the apps publish their titles in, by id
+        val shelves = HashMap<Long, String>()
+        try {
+            ctx.contentResolver.query(Uri.parse("content://android.media.tv/channel"), arrayOf("_id", "display_name"), null, null, null)?.use { c ->
+                while (c.moveToNext()) if (!c.isNull(1)) shelves[c.getLong(0)] = c.getString(1).trim()
+            }
+        } catch (_: Exception) {}
 
         fun read(uri: String, order: String?, watchNext: Boolean, kindOf: (android.database.Cursor) -> String) {
             try {
@@ -68,6 +77,7 @@ object TvFeed {
                     val iEng = col("last_engagement_time_utc_millis")
                     val iType = col("type")
                     val iDate = col("release_date")
+                    val iChan = col("channel_id")
                     if (iPkg < 0 || iTitle < 0) return
                     while (c.moveToNext()) {
                         val pkg = c.getString(iPkg) ?: continue
@@ -104,7 +114,8 @@ object TvFeed {
                                 if (iEng >= 0 && !c.isNull(iEng)) c.getLong(iEng) else 0L, watchNext,
                                 if (progress >= 0f) (dur - pos).coerceAtLeast(0L) else 0L,
                                 if (iType >= 0 && !c.isNull(iType)) c.getInt(iType) else -1,
-                                if (iDate >= 0 && !c.isNull(iDate)) c.getString(iDate)?.take(4)?.toIntOrNull() ?: 0 else 0))
+                                if (iDate >= 0 && !c.isNull(iDate)) c.getString(iDate)?.take(4)?.toIntOrNull() ?: 0 else 0,
+                                if (iChan >= 0 && !c.isNull(iChan)) shelves[c.getLong(iChan)].orEmpty() else ""))
                     }
                 }
             } catch (e: Exception) {

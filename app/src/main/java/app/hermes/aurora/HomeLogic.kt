@@ -94,13 +94,30 @@ internal object HomeLogic {
         return out
     }
 
-    /** The shelves of the music apps: per app, what it publishes with a square cover (playlists, albums, artists). */
+    /**
+     * The shelves of the music apps: what each publishes with a square cover (playlists, albums, artists), one
+     * shelf per row the app published them in ("Recently played", "Your playlists" ...). An app that names no rows
+     * is split by what the covers are (playlists, albums, artists), and one that says neither has a single shelf.
+     * The app [first] (the user's music app) comes before the others.
+     */
     fun musicLanes(
-        feed: Map<String, List<TvFeed.Item>>, appOrder: List<String>, perLane: Int = 12, labelOf: (String) -> String?
-    ): List<Lane> = appOrder.distinct().mapNotNull { p ->
-        val covers = feed[p].orEmpty().filter { it.square && !it.channel }
-        val name = labelOf(p)
-        if (covers.isEmpty() || name == null) null else Lane(name, covers.take(perLane), false)
+        feed: Map<String, List<TvFeed.Item>>, appOrder: List<String>, perLane: Int = 12, first: String = "", labelOf: (String) -> String?
+    ): List<Lane> {
+        val order = appOrder.distinct().let { o -> if (first in o) listOf(first) + o.filter { it != first } else o }
+        return order.flatMap { p ->
+            val covers = feed[p].orEmpty().filter { it.square && !it.channel }
+            val name = labelOf(p)
+            if (covers.isEmpty() || name == null) emptyList() else {
+                var groups = covers.groupBy { it.shelf.trim() }
+                if (groups.size < 2) groups = covers.groupBy { coverKind(it.kind) }
+                if (groups.size < 2) listOf(Lane(name, covers.take(perLane), false))
+                else groups.map { (g, l) -> Lane(if (g.isEmpty() || g.equals(name, true)) name else "$name  ·  $g", l.take(perLane), false) }
+            }
+        }
+    }
+
+    private fun coverKind(kind: String) = when (kind) {
+        "PLAYLIST" -> "Playlists"; "ALBUM" -> "Albums"; "ARTIST" -> "Artists"; "TRACK" -> "Songs"; else -> ""
     }
 
     // ---------------------------------------------------------------- default previews of newly installed apps

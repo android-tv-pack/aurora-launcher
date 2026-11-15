@@ -109,8 +109,7 @@ internal class VisualizerView(private val a: MainActivity) : View(a) {
     private var mid = 0f
     private var treble = 0f
     private var beat = 0f
-    private var bassAvg = 0f
-    private var lastBeat = 0L
+    private val beats = Beat()
     private var t = 0f
     private var lastFrame = 0L
 
@@ -260,8 +259,14 @@ internal class VisualizerView(private val a: MainActivity) : View(a) {
         for (i in 0 until 6) bs += target[i]
         bs /= 6f
         val now = SystemClock.uptimeMillis()
-        if (bs > bassAvg * 1.28f + 0.07f && bs > 0.3f && now - lastBeat > 170) { beat = 1f; lastBeat = now; beatHit = true }
-        bassAvg = bassAvg * 0.92f + bs * 0.08f
+        val fired = beats.feed(bs, now)
+        if (fired) { beat = 1f; beatHit = true }
+        // (adb shell setprop log.tag.AuroraViz DEBUG shows the figures the scenes move to)
+        if (android.util.Log.isLoggable("AuroraViz", android.util.Log.DEBUG)) {
+            var raw = 0f
+            for (k in 1..3) { val re = fft[2 * k].toFloat(); val im = fft[2 * k + 1].toFloat(); raw += sqrt(re * re + im * im) }
+            android.util.Log.d("AuroraViz", "$now bs=%.2f avg=%.2f raw=%.0f peak=%.0f %s".format(java.util.Locale.US, bs, beats.average, raw, peak, if (fired) "BEAT" else ""))
+        }
     }
 
     private fun refreshPalette() {

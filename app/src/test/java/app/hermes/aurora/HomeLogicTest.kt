@@ -108,6 +108,31 @@ class HomeLogicTest {
         assertEquals(listOf("Playlist", "Album"), shelves[0].items.map { it.title })
     }
 
+    private fun cover(pkg: String, title: String, shelf: String = "", kind: String = "RECOMMENDED") =
+        TvFeed.Item(pkg, title, "", "art://$title", false, true, kind, null, -1f, shelf = shelf)
+
+    @Test fun musicShelvesFollowTheRowsTheAppPublishes() {
+        val feed = mapOf("m" to listOf(cover("m", "a", "Recently played"), cover("m", "b", "Your playlists"), cover("m", "c", "Recently played"), cover("m", "d", "M")))
+        val l = HomeLogic.musicLanes(feed, listOf("m")) { "M" }
+        assertEquals(listOf("M  ·  Recently played", "M  ·  Your playlists", "M"), l.map { it.title })
+        assertEquals(listOf("a", "c"), l[0].items.map { it.title })
+    }
+
+    @Test fun withoutRowNamesCoversAreSplitByWhatTheyAre() {
+        val feed = mapOf("m" to listOf(cover("m", "a", kind = "PLAYLIST"), cover("m", "b", kind = "ALBUM"), cover("m", "c", kind = "PLAYLIST")))
+        assertEquals(listOf("M  ·  Playlists", "M  ·  Albums"), HomeLogic.musicLanes(feed, listOf("m")) { "M" }.map { it.title })
+        // one row name for everything says nothing: the kinds decide
+        val one = mapOf("m" to listOf(cover("m", "a", "Home", "PLAYLIST"), cover("m", "b", "Home", "ARTIST")))
+        assertEquals(listOf("M  ·  Playlists", "M  ·  Artists"), HomeLogic.musicLanes(one, listOf("m")) { "M" }.map { it.title })
+    }
+
+    @Test fun theChosenMusicAppComesFirst() {
+        val feed = mapOf("a" to listOf(cover("a", "x")), "b" to listOf(cover("b", "y")))
+        assertEquals(listOf("A", "B"), HomeLogic.musicLanes(feed, listOf("a", "b")) { it.uppercase() }.map { it.title })
+        assertEquals(listOf("B", "A"), HomeLogic.musicLanes(feed, listOf("a", "b"), first = "b") { it.uppercase() }.map { it.title })
+        assertEquals(listOf("A", "B"), HomeLogic.musicLanes(feed, listOf("a", "b"), first = "gone") { it.uppercase() }.map { it.title })
+    }
+
     @Test fun timeLeftIsReadable() {
         assertEquals("38 min left", HomeLogic.leftText(38 * 60_000L))
         assertEquals("1 min left", HomeLogic.leftText(20_000L))

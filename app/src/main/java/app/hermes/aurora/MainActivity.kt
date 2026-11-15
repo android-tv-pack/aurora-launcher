@@ -609,7 +609,27 @@ class MainActivity : Activity() {
     internal fun lanes(): List<HomeLogic.Lane> = HomeLogic.lanes(feed, pkgOrder(), { appByPkg[it]?.label }, store.pins)
 
     /** the shelves of the music apps: playlists, albums, artists */
-    internal fun musicLanes(): List<HomeLogic.Lane> = HomeLogic.musicLanes(feed, pkgOrder()) { appByPkg[it]?.label }
+    internal fun musicLanes(): List<HomeLogic.Lane> = HomeLogic.musicLanes(feed, pkgOrder(), first = musicApp()?.pkg.orEmpty()) { appByPkg[it]?.label }
+
+    private fun isAudioApp(pkg: String): Boolean = try {
+        android.os.Build.VERSION.SDK_INT >= 26 && packageManager.getApplicationInfo(pkg, 0).category == ApplicationInfo.CATEGORY_AUDIO
+    } catch (_: Exception) { false }
+
+    /** the user's music app: the chosen one, else the first app that offers covers, else the first that calls itself an audio app */
+    internal fun musicApp(): AppEntry? {
+        appByPkg[store.musicApp]?.let { return it }
+        val shown = apps.filter { it.pkg != packageName && !it.key.endsWith("/googletv") && it.key !in store.hidden }
+        return shown.firstOrNull { e -> feed[e.pkg].orEmpty().any { it.square && !it.channel } } ?: shown.firstOrNull { isAudioApp(it.pkg) }
+    }
+
+    private fun askMusicApp() {
+        val list = manageable().sortedBy { !isAudioApp(it.pkg) }
+        val sh = sheet("Music app", "Its playlists come first in the music panel, and it is the app that panel offers to open when nothing plays. " +
+            "Automatic takes the first app that offers playlists.")
+        sh.item("Automatic", { if (store.musicApp.isEmpty() || appByPkg[store.musicApp] == null) "\u2713" else "" }) { store.musicApp = ""; refreshPanel?.invoke(); currentStyle?.onFeed() }
+        for (e in list) sh.item(e.label, { if (store.musicApp == e.pkg) "\u2713" else "" }) { store.musicApp = e.pkg; refreshPanel?.invoke(); currentStyle?.onFeed() }
+        sh.open()
+    }
 
     /** the pinned titles as one lane, or null when nothing is pinned */
     internal fun pinLane(): HomeLogic.Lane? {
@@ -846,6 +866,8 @@ class MainActivity : Activity() {
             )),
             Tab("Music & screensaver", "The picture shows the setting you are on, moving as it will on the home screen. " +
                 "With music playing it follows the music.", preview = 2, rows = listOf(
+                Row("Music app", "Your player: first in the music panel, and opened from it",
+                    { (if (appByPkg[store.musicApp] == null) "Automatic  ·  " else "") + (musicApp()?.label ?: "none found") }, steps = false) { askMusicApp() },
                 Row("Music visualizer", "A scene that moves with the music on the home screen", { vizLabel() }, scene = vizScene) { d ->
                     store.visualizer = (store.visualizer + d + VisualizerView.MODES.size) % VisualizerView.MODES.size
                     viz.evaluate()

@@ -669,8 +669,12 @@ internal class DriftStyle(a: MainActivity) : HomeStyle(a) {
             first = false
             if (info.playing) playing = true
         }
+        var idleCard = false
         if (first) {
-            note(np, if (NowPlaying.enabled(a)) "Nothing is playing."
+            // nothing plays: the user's music app waits here
+            val m = a.musicApp()
+            if (m != null) { np.addView(musicAppCard(m), LinearLayout.LayoutParams(-1, -2).apply { setMargins(u(30), u(4), u(30), u(8)) }); idleCard = true }
+            if (m == null || !NowPlaying.enabled(a)) note(np, if (NowPlaying.enabled(a)) "Nothing is playing."
                 else "Nothing is playing. Showing and controlling what plays needs a one-time setup: the README has the command.")
         }
         if (playing) a.handler.postDelayed(npTick, 1000)
@@ -678,7 +682,31 @@ internal class DriftStyle(a: MainActivity) : HomeStyle(a) {
             val v = had?.let { np.findViewWithTag<View>(it) } ?: np.findViewWithTag(MAIN)
             if (v != null) v.requestFocus() else sheetFocus?.invoke()
         }
-        return !first
+        return !first || idleCard
+    }
+
+    /** nothing plays: the music app with a button that opens it */
+    private fun musicAppCard(e: AppEntry): View {
+        val card = LinearLayout(a).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = rounded(Color.argb(46, 255, 255, 255), u(14))
+            setPadding(u(12), u(10), u(12), u(10))
+            clipChildren = false
+        }
+        card.addView(ImageView(a).apply { setImageDrawable(e.icon); scaleType = ImageView.ScaleType.FIT_CENTER }, LinearLayout.LayoutParams(u(44), u(44)))
+        val col = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL }
+        col.addView(label(9f, a.accent, "sans-serif-medium", 0.26f).apply { text = "YOUR MUSIC APP"; maxLines = 1 })
+        col.addView(titleLabel(13.5f, 1).apply { setTitle(e.label) }, LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, u(2), 0, 0) })
+        col.addView(label(10.5f, Color.argb(200, 255, 255, 255)).apply { text = "Nothing is playing"; includeFontPadding = true })
+        card.addView(col, LinearLayout.LayoutParams(0, -2, 1f).apply { setMargins(u(12), 0, u(8), 0) })
+        card.addView(actionButton(true).apply {
+            text = "Open"
+            tag = MAIN
+            setPadding(u(14), u(6), u(14), u(6))
+            setOnClickListener { a.openApp(e) }
+        }, LinearLayout.LayoutParams(-2, -2))
+        return card
     }
 
     private fun nowPlayingCard(e: AppEntry, info: NowPlaying.Info, first: Boolean): View {
