@@ -28,6 +28,10 @@ internal class Sheet(private val a: MainActivity, private val title: String, pri
     private val items = ArrayList<Item>()
     private val buttons = ArrayList<Button>()
     private var field: EditText? = null
+    private var picture = 0
+
+    /** a picture under the words (a code to scan with a phone) */
+    fun picture(res: Int): Sheet { picture = res; return this }
 
     /** a choice; [value] is shown at its right and read again after OK when the sheet stays open ([close] = false) */
     fun item(label: String, value: (() -> String)? = null, danger: Boolean = false, close: Boolean = true, act: () -> Unit): Sheet {
@@ -81,6 +85,12 @@ internal class Sheet(private val a: MainActivity, private val title: String, pri
             card.addView(label(it, 12f, white(170)).apply { setLineSpacing(a.u(3).toFloat(), 1f) },
                 LinearLayout.LayoutParams(-1, -2).apply { topMargin = a.u(8) })
         }
+
+        if (picture != 0) card.addView(android.widget.ImageView(a).apply {
+            setImageResource(picture)
+            background = a.rounded(Color.WHITE, a.u(10))
+            clipToOutline = true
+        }, LinearLayout.LayoutParams(a.u(150), a.u(150)).apply { topMargin = a.u(14); gravity = Gravity.CENTER_HORIZONTAL })
 
         var first: View? = null
         field?.let { e ->

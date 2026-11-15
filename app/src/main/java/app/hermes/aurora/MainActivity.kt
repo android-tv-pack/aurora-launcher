@@ -986,6 +986,31 @@ class MainActivity : Activity() {
                 Row("Apps", "Open, update or remove the apps on this device", { num(manageable().size) }, steps = false) { askApps() },
                 Row("Clear cache", "Free the space taken by temporary files", { HomeLogic.size(ownCache()) }, steps = false) { askCache() },
                 Row("Settings backup", "Save these settings, or bring saved ones back", { backupLabel() }, steps = false) { askBackup() }
+            )),
+            Tab("About", "Aurora is a free home screen for Android TV and Google TV, with no adverts, no account and no tracking. " +
+                "It is part of Android TV Pack, a set of free apps for TV boxes, and its source is open.",
+                stats = { listOf(
+                    "VERSION" to BuildConfig.VERSION_NAME.replace("-", " ") + (if (BuildConfig.VERSION_NAME.endsWith("-beta")) "  \u00B7  still being tested" else ""),
+                    "LICENCE" to "GNU General Public License, version 3",
+                    "NETWORK USE" to "The weather, and only if you switch them on: extra artwork, the ad blocker's list, AirPlay. Looking for an update asks GitHub.") },
+                rows = listOf(
+                Row("Version", "OK looks for a newer one", { BuildConfig.VERSION_NAME.replace("-", " ") }, steps = false) { askUpdate() },
+                Row("Developer", "Android TV Pack", { DEVELOPER }, steps = false) {},
+                Row("GitHub", "Source, new versions, reporting a fault", { "android-tv-pack" }, steps = false) {
+                    Sheet(this, GITHUB, "Scan the code with a phone, or type the address into a browser. There you find the source, new versions, and where to report a fault or ask for something.")
+                        .picture(R.drawable.qr_github).button("Close", primary = true).show { focusPanel?.invoke() }
+                },
+                Row("Buy me a Ko-fi", "Aurora is free. If you like it, you can thank its developer", { "\u2665" }, steps = false) {
+                    Sheet(this, KOFI, "Aurora is free and stays free, with no adverts. If it is useful to you, you can support its development with a coffee: " +
+                        "scan the code with a phone, or type the address into a browser. Thank you.")
+                        .picture(R.drawable.qr_kofi).button("Close", primary = true).show { focusPanel?.invoke() }
+                },
+                Row("Open-source parts", "What Aurora is built with", { "" }, steps = false) {
+                    Sheet(this, "Open-source parts", "The AirPlay receiver is android-airplay-server by jqssun, based on UxPlay, under the GNU GPL version 3. That is why Aurora is under the GPL as well.\n\n" +
+                        "AndroidX, Media3 and Oboe, by The Android Open Source Project and Google, under the Apache License 2.0.\n\n" +
+                        "Kotlin, by JetBrains and contributors, under the Apache License 2.0.")
+                        .button("Close", primary = true).show { focusPanel?.invoke() }
+                }
             ))
         )
     }
@@ -1496,6 +1521,9 @@ class MainActivity : Activity() {
     }
 
     private companion object {
+        const val DEVELOPER = "aze038"
+        const val GITHUB = "github.com/android-tv-pack/aurora-launcher"
+        const val KOFI = "ko-fi.com/G0U5290K4T"
         /** how dark the night veil is: 0..255 (about 40 %) */
         const val NIGHT_VEIL = 102
         /** how long a key press keeps the home bright at night */
