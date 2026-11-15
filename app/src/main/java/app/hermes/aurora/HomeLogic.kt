@@ -245,4 +245,34 @@ internal object HomeLogic {
         val cut = if (atBoundary || space < head.length / 3) head else head.substring(0, space)
         return cut.trimEnd { it.isWhitespace() || it in ",.:;-–—·(" } + "…"
     }
+
+    // ---------------------------------------------------------------- the device (Customize > System)
+
+    /** "1.4 GB", "312 MB", "18 KB" */
+    fun size(bytes: Long): String {
+        val b = bytes.coerceAtLeast(0)
+        return when {
+            b >= 1L shl 30 -> String.format(java.util.Locale.US, "%.1f GB", b / (1L shl 30).toDouble())
+            b >= 1L shl 20 -> "${b shr 20} MB"
+            else -> "${b shr 10} KB"
+        }
+    }
+
+    /** "3 d 4 h", "5 h 12 min", "7 min" */
+    fun uptime(ms: Long): String {
+        val min = ms / 60_000
+        return when {
+            min >= 1440 -> "${min / 1440} d ${min % 1440 / 60} h"
+            min >= 60 -> "${min / 60} h ${min % 60} min"
+            else -> "$min min"
+        }
+    }
+
+    /** one line on how the device is doing, from its free storage and whether Android reports low memory */
+    fun health(freeBytes: Long, totalBytes: Long, lowMemory: Boolean): String = when {
+        totalBytes > 0 && (freeBytes < totalBytes / 20 || freeBytes < 300L shl 20) -> "Storage is almost full"
+        lowMemory -> "Memory is low"
+        totalBytes > 0 && freeBytes < totalBytes / 10 -> "Storage is getting full"
+        else -> "Good"
+    }
 }

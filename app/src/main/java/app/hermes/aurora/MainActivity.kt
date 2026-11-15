@@ -55,9 +55,14 @@ class MainActivity : Activity() {
 
     /** a setting of Customize; [steps] = Left and Right step through its values (otherwise OK acts) */
     private class Row(val title: String, val desc: String, val value: () -> String, val shown: () -> Boolean = { true },
-                      val steps: Boolean = true, val act: (Int) -> Unit)
+                      val steps: Boolean = true,
+                      /** for the tab with the scene picture: what this setting shows there, as (caption, visualizer mode) */
+                      val scene: (() -> Pair<String, Int>)? = null,
+                      val act: (Int) -> Unit)
     /** a tab of Customize: its settings on the left; on the right what it is for, figures, and for Look a live picture */
-    private class Tab(val name: String, val blurb: String, val preview: Boolean = false,
+    private class Tab(val name: String, val blurb: String,
+                      /** the picture in the card: 0 none, 1 the home screen, 2 the visualizer or screensaver scene */
+                      val preview: Int = 0,
                       val stats: () -> List<Pair<String, String>> = { emptyList() }, val rows: List<Row>)
 
     internal lateinit var store: Store
@@ -785,8 +790,13 @@ class MainActivity : Activity() {
         val saverNames = arrayOf("Off", "2 min", "5 min", "10 min", "20 min")
         val saverScenes = intArrayOf(6, 5, 4, -1)             // Blade Runner, Cyberpunk, Desert, Rotate
         val rotNames = arrayOf("Off", "Every track", "Every 5 min", "Every 15 min")
+        val vizScene = { ("MUSIC VISUALIZER  ·  " + VisualizerView.MODES[store.visualizer].uppercase(Locale.US)) to store.visualizer }
+        val saverScene = {
+            if (store.saverMode == -1) "SCREENSAVER  ·  ROTATES THROUGH ITS SCENES" to saverScenes[0]
+            else ("SCREENSAVER  ·  " + VisualizerView.MODES[store.saverMode].uppercase(Locale.US)) to store.saverMode
+        }
         return listOf(
-            Tab("Look", "How the home screen looks. The picture shows your home as it is now and follows every change.", preview = true, rows = listOf(
+            Tab("Look", "How the home screen looks. The picture shows your home as it is now and follows every change.", preview = 1, rows = listOf(
                 Row("Home style", "The layout of the home screen", { HomeLogic.STYLE_NAMES[store.style - 1] }) {
                     store.style = if (store.style == HomeLogic.CINEMA) HomeLogic.DRIFT else HomeLogic.CINEMA
                     render(null)
@@ -834,22 +844,23 @@ class MainActivity : Activity() {
                     updateWeather()
                 }
             )),
-            Tab("Music & screensaver", "What moves on the screen while music plays, when the home is left alone, and how it darkens at night.", rows = listOf(
-                Row("Music visualizer", "A scene that moves with the music on the home screen", { vizLabel() }) { d ->
+            Tab("Music & screensaver", "The picture shows the setting you are on, moving as it will on the home screen. " +
+                "With music playing it follows the music.", preview = 2, rows = listOf(
+                Row("Music visualizer", "A scene that moves with the music on the home screen", { vizLabel() }, scene = vizScene) { d ->
                     store.visualizer = (store.visualizer + d + VisualizerView.MODES.size) % VisualizerView.MODES.size
                     viz.evaluate()
                     onVisualizerChanged()
                 },
-                Row("Visualizer rotation", "Changes the scene by itself", { rotNames[store.vizRotate] }, { store.visualizer != 0 }) { d ->
+                Row("Visualizer rotation", "Changes the scene by itself", { rotNames[store.vizRotate] }, { store.visualizer != 0 }, scene = vizScene) { d ->
                     store.vizRotate = (store.vizRotate + d + 4) % 4
                     viz.evaluate()
                 },
-                Row("Screensaver", "Starts when the home screen has been left alone this long", { saverNames[store.saver] }) { d ->
+                Row("Screensaver", "Starts when the home screen has been left alone this long", { saverNames[store.saver] }, scene = saverScene) { d ->
                     store.saver = (store.saver + d + 5) % 5
                     lastInteraction = android.os.SystemClock.elapsedRealtime()
                 },
                 Row("Screensaver scene", "What the screensaver shows",
-                    { if (store.saverMode == -1) "Rotate" else VisualizerView.MODES[store.saverMode] }, { store.saver != 0 }) { d ->
+                    { if (store.saverMode == -1) "Rotate" else VisualizerView.MODES[store.saverMode] }, { store.saver != 0 }, scene = saverScene) { d ->
                     val i = saverScenes.indexOf(store.saverMode).coerceAtLeast(0)
                     store.saverMode = saverScenes[(i + d + saverScenes.size) % saverScenes.size]
                 },
@@ -905,8 +916,20 @@ class MainActivity : Activity() {
                     AdBlock.choose(this, store, (store.adblock + d + 2) % 2)
                 }
             )),
-            Tab("System", "How Aurora works with the device.",
-                stats = { listOf("VERSION" to "Aurora " + BuildConfig.VERSION_NAME.replace("-", " "), "LAST BACKUP" to backupLabel()) }, rows = listOf(
+            Tab("System", "How Aurora works with the device, and how the device is doing.",
+                stats = {
+                    val out = ArrayList<Pair<String, String>>()
+                    var free = 0L; var total = 0L; var low = false
+                    try { val st = android.os.StatFs(android.os.Environment.getDataDirectory().path); free = st.availableBytes; total = st.totalBytes } catch (_: Exception) {}
+                    val mi = android.app.ActivityManager.MemoryInfo()
+                    try { (getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager).getMemoryInfo(mi); low = mi.lowMemory } catch (_: Exception) {}
+                    out += "HEALTH" to HomeLogic.health(free, total, low)
+                    if (total > 0) out += "STORAGE" to HomeLogic.size(free) + " free of " + HomeLogic.size(total)
+                    if (mi.totalMem > 0) out += "MEMORY" to HomeLogic.size(mi.availMem) + " free of " + HomeLogic.size(mi.totalMem)
+                    out += "NETWORK" to networkLine()
+                    out += "RUNNING FOR" to HomeLogic.uptime(android.os.SystemClock.elapsedRealtime()) + "  ·  " + android.os.Build.MODEL + ", Android " + android.os.Build.VERSION.RELEASE
+                    out
+                }, rows = listOf(
                 Row("Home button opens Aurora", "The Home key of the remote comes here, not to the built-in home", { homeLabel() }) {
                     if (!HomeGuardService.canSwitch(this) && !HomeGuardService.isEnabled(this)) {
                         Toast.makeText(this, "Needs a one-time adb grant: the README has the command", Toast.LENGTH_LONG).show()
@@ -918,9 +941,95 @@ class MainActivity : Activity() {
                 Row("Pause music when another app opens", "Music does not play on under a film", { onOff(store.pauseOnSwitch) }) {
                     store.pauseOnSwitch = !store.pauseOnSwitch
                 },
+                Row("Apps", "Open, update or remove the apps on this device", { num(manageable().size) }, steps = false) { askApps() },
+                Row("Clear cache", "Free the space taken by temporary files", { HomeLogic.size(ownCache()) }, steps = false) { askCache() },
                 Row("Settings backup", "Save these settings, or bring saved ones back", { backupLabel() }, steps = false) { askBackup() }
             ))
         )
+    }
+
+    /** "Wi-Fi  ·  192.168.1.20", "Ethernet", "Not connected" */
+    private fun networkLine(): String = try {
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val n = cm.activeNetwork
+        val caps = cm.getNetworkCapabilities(n)
+        if (n == null || caps == null) "Not connected" else {
+            val kind = when {
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "Ethernet"
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "Wi-Fi"
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN) -> "Connected"
+                else -> "Connected"
+            }
+            val ip = cm.getLinkProperties(n)?.linkAddresses?.map { it.address }?.firstOrNull { it is java.net.Inet4Address }?.hostAddress
+            kind + (if (ip != null) "  ·  $ip" else "")
+        }
+    } catch (_: Exception) { "Unknown" }
+
+    /** the apps of the home screen that can be managed: all but Aurora itself and the entry for the built-in home */
+    private fun manageable(): List<AppEntry> =
+        apps.filter { it.pkg != packageName && !it.key.endsWith("/googletv") }.distinctBy { it.pkg }.sortedBy { it.label.lowercase(Locale.getDefault()) }
+
+    private fun askApps() {
+        val list = manageable()
+        if (list.isEmpty()) return
+        val sh = sheet("Apps", "Choose an app to open it, look for an update, see its storage, or remove it.")
+        for (e in list) {
+            val version = try { packageManager.getPackageInfo(e.pkg, 0).versionName.orEmpty() } catch (_: Exception) { "" }
+            sh.item(e.label, { version }) { askApp(e) }
+        }
+        sh.open()
+    }
+
+    /** the store an app came from, as (package, name), or null for an app installed from a file */
+    private fun storeOf(pkg: String): Pair<String, String>? = try {
+        val from = if (android.os.Build.VERSION.SDK_INT >= 30) packageManager.getInstallSourceInfo(pkg).installingPackageName
+                   else @Suppress("DEPRECATION") packageManager.getInstallerPackageName(pkg)
+        val page = Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$pkg"))
+        if (from == null || packageManager.resolveActivity(page.setPackage(from), 0) == null) null
+        else from to packageManager.getApplicationLabel(packageManager.getApplicationInfo(from, 0)).toString()
+    } catch (_: Exception) { null }
+
+    private fun askApp(e: AppEntry) {
+        val shop = storeOf(e.pkg)
+        val sh = sheet(e.label, if (shop == null) "Installed from a file, so there is no store to update it from: install a newer file over it." else null)
+        sh.item("Open") { openApp(e) }
+        if (shop != null) sh.item("Look for an update", { shop.second }) {
+            launch(Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=${e.pkg}")).setPackage(shop.first))
+        }
+        sh.item("Storage and cache", { "Android's page" }) { launch(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${e.pkg}"))) }
+        if (!e.system) sh.item("Uninstall", danger = true) { launch(Intent(Intent.ACTION_DELETE, Uri.parse("package:${e.pkg}"))) }
+        sh.open()
+    }
+
+    /** what Aurora itself keeps and can fetch again: pictures in memory, answers from TMDB, the programme guide, temporary files */
+    private fun ownCache(): Long {
+        fun dir(f: java.io.File?): Long = f?.walkTopDown()?.filter { it.isFile }?.sumOf { it.length() } ?: 0L
+        val guide = filesDir.listFiles { x -> x.name.startsWith("tv-") }?.sumOf { it.length() } ?: 0L
+        val tmdb = java.io.File(filesDir.parentFile, "shared_prefs/tmdb.xml").length()
+        return Images.kept() + dir(cacheDir) + dir(externalCacheDir) + guide + tmdb
+    }
+
+    private fun askCache() {
+        sheet("Clear cache", "Temporary files are fetched again when they are needed, so nothing is lost. " +
+            "Android lets an app clear only its own; for every app at once, Android's storage page has \"Cached data\".")
+            .item("Aurora's own", { HomeLogic.size(ownCache()) }) {
+                Images.forget()
+                Tmdb.forget(this)
+                Iptv.forget(this)
+                try { cacheDir.deleteRecursively(); externalCacheDir?.deleteRecursively() } catch (_: Exception) {}
+                Toast.makeText(this, "Cleared", Toast.LENGTH_SHORT).show()
+                refreshPanel?.invoke()
+                currentStyle?.onFeed()
+                Iptv.refresh(this, store, false) { refreshPanel?.invoke(); if (Iptv.stamp(store) != tvStamp) loadFeed() }
+            }
+            .item("Every app", { "Android's storage page" }) { launch(Intent(Settings.ACTION_INTERNAL_STORAGE_SETTINGS)) }
+            .open()
+    }
+
+    /** shows a visualizer mode in the picture of Customize (0 = back to normal) */
+    private fun previewViz(mode: Int) {
+        viz.preview = mode
+        viz.covered = if (mode > 0) false else covered
     }
 
     /** Customize: a full-screen page, tabs along the top, the tab's settings on the left and what they are for on the right. */
@@ -940,7 +1049,10 @@ class MainActivity : Activity() {
         val p = FrameLayout(this)
         p.background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(Color.rgb(14, 19, 38), Color.rgb(6, 8, 16)))
         p.isClickable = true
-        val page = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(u(48), u(30), u(48), u(16)) }
+        val page = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; setPadding(u(48), u(30), u(48), u(16))
+            clipToPadding = false; clipChildren = false          // (the focus ring of the first tab reaches into the margin)
+        }
 
         // ---- header
         val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
@@ -965,8 +1077,8 @@ class MainActivity : Activity() {
             setPadding(u(20), u(18), u(20), u(18))
         }
         val body = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        body.addView(scroll, LinearLayout.LayoutParams(u(500), -1))
-        body.addView(side, LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = u(28) })
+        body.addView(scroll, LinearLayout.LayoutParams(u(450), -1))
+        body.addView(side, LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = u(26) })
         page.addView(body, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = u(16) })
 
         // ---- footer
@@ -978,6 +1090,15 @@ class MainActivity : Activity() {
 
         val rowViews = ArrayList<Triple<Row, View, TextView>>()
         var statsBox: LinearLayout? = null
+        var caption: TextView? = null
+        var sceneRow: Row? = null
+        /** the scene picture follows the setting in focus */
+        fun applyScene() {
+            if (tabs[cur].preview != 2) return
+            val (name, mode) = (sceneRow?.scene ?: tabs[cur].rows.firstNotNullOf { it.scene })()
+            previewViz(mode)
+            caption?.text = name
+        }
         fun refresh() {
             for ((r, line, v) in rowViews) {
                 v.text = if (r.steps) "\u2039   ${r.value()}   \u203A" else r.value()
@@ -986,10 +1107,11 @@ class MainActivity : Activity() {
             statsBox?.let { box ->
                 box.removeAllViews()
                 for ((k, v) in tabs[cur].stats()) {
-                    box.addView(caps(k, white(120)), LinearLayout.LayoutParams(-2, -2).apply { topMargin = u(14) })
-                    box.addView(label(v, 15f, Color.WHITE).apply { setLineSpacing(u(2).toFloat(), 1f) }, LinearLayout.LayoutParams(-2, -2).apply { topMargin = u(2) })
+                    box.addView(caps(k, white(120)), LinearLayout.LayoutParams(-2, -2).apply { topMargin = u(11) })
+                    box.addView(label(v, 14f, Color.WHITE).apply { setLineSpacing(u(2).toFloat(), 1f) }, LinearLayout.LayoutParams(-2, -2).apply { topMargin = u(2) })
                 }
             }
+            applyScene()
         }
         fun styleTabs() {
             for ((i, t) in tabViews.withIndex()) {
@@ -1009,6 +1131,8 @@ class MainActivity : Activity() {
             store.settingsTab = i
             val tab = tabs[i]
             list.removeAllViews(); rowViews.clear(); panelRow = null
+            sceneRow = null; caption = null
+            previewViz(0)
             scroll.scrollTo(0, 0)
             for (r in tab.rows) {
                 val line = LinearLayout(this).apply {
@@ -1031,6 +1155,7 @@ class MainActivity : Activity() {
                     v.background = if (has) rounded(white(40), u(11), u(2), accent) else rounded(white(10), u(11))
                     value.setTextColor(if (has) accent else white(210))
                     if (has) panelRow = v
+                    if (has && r.scene != null) { sceneRow = r; applyScene() }
                 }
                 line.setOnClickListener { r.act(1); refresh() }
                 line.setOnKeyListener { v, kc, ev ->
@@ -1051,9 +1176,16 @@ class MainActivity : Activity() {
 
             side.removeAllViews()
             side.addView(caps(tab.name.uppercase(Locale.US), accent))
-            if (tab.preview) {
-                val w = u(296)      // the card's inner width: 864 - 500 - 28 - 2 x 20
+            val w = u(864 - 450 - 26 - 40)      // the card's inner width
+            if (tab.preview == 1) {
                 side.addView(MirrorView(this, rootView) { listOf(panel, dim) }, LinearLayout.LayoutParams(w, w * 9 / 16).apply { topMargin = u(12) })
+            } else if (tab.preview == 2) {
+                // only the visualizer, on black
+                val mirror = MirrorView(this, rootView) { (0 until rootView.childCount).map { rootView.getChildAt(it) }.filter { it !== viz } }
+                mirror.setBackgroundColor(Color.BLACK)
+                side.addView(mirror, LinearLayout.LayoutParams(w, w * 9 / 16).apply { topMargin = u(12) })
+                caption = caps("", white(150))
+                side.addView(caption, LinearLayout.LayoutParams(-2, -2).apply { topMargin = u(9) })
             }
             side.addView(label(tab.blurb, 12f, white(170)).apply { setLineSpacing(u(3).toFloat(), 1f) }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = u(10) })
             statsBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -1104,6 +1236,7 @@ class MainActivity : Activity() {
 
     private fun closeSettings() {
         handler.removeCallbacks(panelTick)
+        previewViz(0)
         panel?.let { rootView.removeView(it) }
         panel = null
         refreshPanel = null

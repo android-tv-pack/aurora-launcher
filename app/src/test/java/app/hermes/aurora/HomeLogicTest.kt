@@ -115,6 +115,25 @@ class HomeLogicTest {
         assertEquals("", HomeLogic.leftText(0))
     }
 
+    // ---- the device
+
+    @Test fun deviceFigures() {
+        assertEquals("1.5 GB", HomeLogic.size(3L shl 29))
+        assertEquals("312 MB", HomeLogic.size(312L shl 20))
+        assertEquals("18 KB", HomeLogic.size(18L shl 10))
+        assertEquals("0 KB", HomeLogic.size(-5))
+        assertEquals("3 d 4 h", HomeLogic.uptime((3 * 1440 + 4 * 60 + 9) * 60_000L))
+        assertEquals("5 h 12 min", HomeLogic.uptime((5 * 60 + 12) * 60_000L))
+        assertEquals("7 min", HomeLogic.uptime(7 * 60_000L + 59_000))
+        val gb = 1L shl 30
+        assertEquals("Good", HomeLogic.health(3 * gb, 8 * gb, false))
+        assertEquals("Storage is getting full", HomeLogic.health(gb * 7 / 10, 8 * gb, false))
+        assertEquals("Storage is almost full", HomeLogic.health(gb / 5, 8 * gb, false))
+        assertEquals("Memory is low", HomeLogic.health(3 * gb, 8 * gb, true))
+        assertEquals("Storage is almost full", HomeLogic.health(gb / 5, 8 * gb, true))
+        assertEquals("Good", HomeLogic.health(0, 0, false))          // the size is not known
+    }
+
     // ---- default previews
 
     @Test fun everyAppIsToldOnceToPublishItsPreviews() {

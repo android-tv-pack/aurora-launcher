@@ -21,6 +21,10 @@ object Images {
         override fun sizeOf(key: String, value: Bitmap) = value.byteCount
     }
 
+    /** the pictures kept in memory, in bytes, and a way to let them go (Customize > System > Clear cache) */
+    fun kept(): Long = cache.size().toLong()
+    fun forget() = cache.evictAll()
+
     /** the same picture is kept once per size it is shown at (a card must not be reused as a full-screen backdrop) */
     private fun key(url: String, maxWidth: Int) = "$maxWidth|$url"
 

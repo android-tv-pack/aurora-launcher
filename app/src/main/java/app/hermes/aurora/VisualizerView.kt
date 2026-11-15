@@ -50,6 +50,9 @@ internal class VisualizerView(private val a: MainActivity) : View(a) {
     /** screensaver: -1 = off, -2 = rotate through the scenes, 4..6 = that scene, drawn full-screen */
     var ambient = -1
         set(v) { field = v; rotMode = -1; evaluate() }
+    /** Customize shows a mode in its little picture: > 0 = that mode, moving also without music */
+    var preview = 0
+        set(v) { if (field != v) { field = v; evaluate() } }
     private var rotMode = -1
     private var rotSince = 0L
     private var rotKey = ""
@@ -59,6 +62,7 @@ internal class VisualizerView(private val a: MainActivity) : View(a) {
 
     /** the mode actually drawn: the screensaver's, the auto-rotation's, or the chosen one */
     fun mode(): Int = when {
+        preview > 0 -> preview
         ambient >= 0 -> ambient
         rotating() -> if (rotMode > 0) rotMode else a.store.visualizer
         else -> a.store.visualizer
@@ -189,7 +193,7 @@ internal class VisualizerView(private val a: MainActivity) : View(a) {
         if (live) { if (viz == null) capture() } else release()
         refreshPalette()
         // the scenes keep moving without music; the others need a signal
-        setActive(mode > 0 && (viz != null || isScene(mode)))
+        setActive(mode > 0 && (viz != null || isScene(mode) || preview > 0))
     }
 
     private fun setActive(on: Boolean) {
