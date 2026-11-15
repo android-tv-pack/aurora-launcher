@@ -563,7 +563,9 @@ internal class DriftStyle(a: MainActivity) : HomeStyle(a) {
             first = f
             val sv = ScrollView(a).apply { isVerticalScrollBarEnabled = false; overScrollMode = View.OVER_SCROLL_NEVER }
             sv.addView(g)
-            box.addView(sv, LinearLayout.LayoutParams(-1, 0, 1f).apply { setMargins(u(30), 0, u(30), u(8)) })
+            // the titles follow right below the apps; without titles the apps may use the whole panel
+            box.addView(sv, (if (titles == null) LinearLayout.LayoutParams(-1, 0, 1f) else LinearLayout.LayoutParams(-1, -2))
+                .apply { setMargins(u(30), 0, u(30), u(8)) })
         }
         if (titles != null) {
             val list = LaneList(a, 84f, 30f, object : LaneList.Host {

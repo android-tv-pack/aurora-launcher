@@ -99,6 +99,8 @@ internal class MarqueeStyle(a: MainActivity) : HomeStyle(a), LaneList.Host {
         val bottom = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP,
             intArrayOf(Color.argb(250, 0, 0, 0), Color.argb(215, 0, 0, 0), Color.argb(60, 0, 0, 0), Color.argb(0, 0, 0, 0)))
         scrim.background = LayerDrawable(arrayOf(left, bottom))
+        // drawn once into a texture: two full-screen gradients on every frame are too much for a weak GPU
+        scrim.setLayerType(View.LAYER_TYPE_HARDWARE, null)
         root.addView(scrim, matchParent())
 
         cover.scaleType = ImageView.ScaleType.CENTER_CROP
