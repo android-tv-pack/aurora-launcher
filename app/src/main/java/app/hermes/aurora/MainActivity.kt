@@ -1,7 +1,6 @@
 package app.hermes.aurora
 
 import android.app.Activity
-import android.app.AlertDialog
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.ComponentName
@@ -351,22 +350,19 @@ class MainActivity : Activity() {
     }
 
     private fun askBackup() {
-        dialogBuilder()
-            .setTitle("Settings backup")
-            .setItems(arrayOf("Back up now", "Restore from the backup")) { _, i ->
-                if (i == 0) {
-                    try { backupFile().parentFile?.mkdirs(); backupFile().writeText(store.exportJson()); Toast.makeText(this, "Backed up", Toast.LENGTH_SHORT).show() }
-                    catch (e: Exception) { Toast.makeText(this, "Backup failed", Toast.LENGTH_SHORT).show() }
-                    refreshPanel?.invoke()
-                } else {
-                    val f = backupFile()
-                    val n = if (f.exists()) store.importJson(f.readText()) else -1
-                    if (n < 0) Toast.makeText(this, "No backup found", Toast.LENGTH_SHORT).show()
-                    else { Toast.makeText(this, "Restored $n settings", Toast.LENGTH_SHORT).show(); recreate() }
-                }
+        sheet("Settings backup", "Kept on this device. Restoring replaces the settings you have now. Your TMDB key and watched channels are not part of it.")
+            .item("Back up now", { backupLabel().let { if (it == "Not yet") "" else "Last: $it" } }) {
+                try { backupFile().parentFile?.mkdirs(); backupFile().writeText(store.exportJson()); Toast.makeText(this, "Backed up", Toast.LENGTH_SHORT).show() }
+                catch (e: Exception) { Toast.makeText(this, "Backup failed", Toast.LENGTH_SHORT).show() }
+                refreshPanel?.invoke()
             }
-            .setNegativeButton("Cancel", null)
-            .show()
+            .item("Restore from the backup") {
+                val f = backupFile()
+                val n = if (f.exists()) store.importJson(f.readText()) else -1
+                if (n < 0) Toast.makeText(this, "No backup found", Toast.LENGTH_SHORT).show()
+                else { Toast.makeText(this, "Restored $n settings", Toast.LENGTH_SHORT).show(); recreate() }
+            }
+            .open()
     }
 
     // ---------------------------------------------------------------- data
@@ -551,7 +547,7 @@ class MainActivity : Activity() {
 
     // ---------------------------------------------------------------- shared UI helpers
 
-    private fun rounded(fill: Int, radius: Int, strokeW: Int = 0, stroke: Int = 0) = GradientDrawable().apply {
+    internal fun rounded(fill: Int, radius: Int, strokeW: Int = 0, stroke: Int = 0) = GradientDrawable().apply {
         setColor(fill)
         cornerRadius = radius.toFloat()
         if (strokeW > 0) setStroke(strokeW, stroke)
@@ -657,9 +653,9 @@ class MainActivity : Activity() {
 
     // ---------------------------------------------------------------- options (hold OK)
 
-    private fun dialogBuilder(): AlertDialog.Builder =
-        AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
-            .setOnDismissListener { focusPanel?.invoke() }
+    /** Aurora's own dialog (see Sheet); when it closes the focus goes back to where it was in Customize */
+    private fun sheet(title: String, message: String? = null) = Sheet(this, title, message)
+    private fun Sheet.open() = show { focusPanel?.invoke() }
 
     /** Options of an app. Pinned apps come first everywhere and are the apps of Drift's pins panel. */
     internal fun showAppMenu(e: AppEntry) {
@@ -715,10 +711,9 @@ class MainActivity : Activity() {
             acts += { launch(Intent(Intent.ACTION_DELETE, Uri.parse("package:${e.pkg}"))) }
         }
 
-        dialogBuilder()
-            .setTitle(e.label)
-            .setItems(labels.toTypedArray()) { _, i -> acts[i]() }
-            .show()
+        val sh = sheet(e.label)
+        for (i in labels.indices) sh.item(labels[i], danger = labels[i] == "Uninstall", act = acts[i])
+        sh.open()
     }
 
     /** Options of a title in a lane: pin it (it then has its own lane, and sits in Drift's pins panel) or unpin it. */
@@ -741,10 +736,9 @@ class MainActivity : Activity() {
             labels += "Open ${app.label}"
             acts += { openApp(app) }
         }
-        dialogBuilder()
-            .setTitle(item.title)
-            .setItems(labels.toTypedArray()) { _, i -> acts[i]() }
-            .show()
+        val sh = sheet(item.title)
+        for (i in labels.indices) sh.item(labels[i], act = acts[i])
+        sh.open()
     }
 
     // ---------------------------------------------------------------- customize panel (MENU)
@@ -1132,84 +1126,55 @@ class MainActivity : Activity() {
     }
 
     private fun askCity() {
-        val input = EditText(this).apply {
-            setText(store.city)
-            hint = "Leave empty to detect automatically"
-            setSelectAllOnFocus(true)
-            inputType = InputType.TYPE_CLASS_TEXT
-            setSingleLine(true)
-        }
-        val holder = FrameLayout(this).apply { setPadding(u(24), u(8), u(24), 0); addView(input) }
-        dialogBuilder()
-            .setTitle("Weather location")
-            .setView(holder)
-            .setPositiveButton("Save") { _, _ -> applyCity(input.text.toString()) }
-            .setNeutralButton("Auto-detect") { _, _ -> applyCity("") }
-            .setNegativeButton("Cancel", null)
-            .show()
+        val sh = sheet("Weather location", "The town the weather is for. Leave it empty and Aurora finds the place by itself.")
+        val input = sh.input(store.city, "Town, for example Lisbon", InputType.TYPE_CLASS_TEXT)
+        sh.button("Cancel")
+            .button("Auto-detect") { applyCity("") }
+            .button("Save", primary = true) { applyCity(input.text.toString()) }
+            .open()
     }
 
     /** recently watched TV channels need the link of a programme guide; typed here, or dropped as a file (see Iptv.takeDropped) */
     private fun askIptv() {
-        val url = EditText(this).apply {
-            setText(store.iptvGuide)
-            hint = "Programme guide link (.xml or .xml.gz)"
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
-            setSingleLine(true)
-        }
-        val holder = FrameLayout(this).apply { setPadding(u(24), u(8), u(24), 0); addView(url) }
-        dialogBuilder()
-            .setTitle("TV channels")
-            .setMessage("Shows the five channels you watched last, with their logos and what is on now and next, taken from your programme guide (XMLTV). " +
-                "To know what you watch, Aurora reads the channel name your IPTV app shows on screen. It looks only at that app, only for channel names, and nothing leaves this device. " +
-                "A channel opens your IPTV app.")
-            .setView(holder)
-            .setPositiveButton("Save") { _, _ ->
-                val v = url.text.toString().trim()
-                val changed = v != store.iptvGuide
-                store.iptvGuide = v
-                store.iptv = v.isNotEmpty()
-                if (changed) Iptv.forget(this)
-                syncHomeGuard()
-                refreshPanel?.invoke()
-                loadFeed()
-                Iptv.refresh(this, store, changed) { refreshPanel?.invoke(); if (Iptv.stamp(store) != tvStamp) loadFeed() }
-            }
-            .setNeutralButton("Turn off") { _, _ -> store.iptv = false; syncHomeGuard(); refreshPanel?.invoke(); loadFeed() }
-            .setNegativeButton("Cancel", null)
-            .show()
+        val sh = sheet("TV channels", "Shows the five channels you watched last, with their logos and what is on now and next, taken from your programme guide (XMLTV). " +
+            "To know what you watch, Aurora reads the channel name your IPTV app shows on screen. It looks only at that app, only for channel names, and nothing leaves this device. " +
+            "A channel opens your IPTV app.")
+        val url = sh.input(store.iptvGuide, "Programme guide link (.xml or .xml.gz)", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI)
+        sh.button("Cancel")
+        if (store.iptv) sh.button("Turn off") { store.iptv = false; syncHomeGuard(); refreshPanel?.invoke(); loadFeed() }
+        sh.button("Save", primary = true) {
+            val v = url.text.toString().trim()
+            val changed = v != store.iptvGuide
+            store.iptvGuide = v
+            store.iptv = v.isNotEmpty()
+            if (changed) Iptv.forget(this)
+            syncHomeGuard()
+            refreshPanel?.invoke()
+            loadFeed()
+            Iptv.refresh(this, store, changed) { refreshPanel?.invoke(); if (Iptv.stamp(store) != tvStamp) loadFeed() }
+        }.open()
     }
 
     /** TMDB needs the user's own free key; typed here, or dropped as a file (see Tmdb.takeDroppedKey) */
     private fun askTmdbKey() {
-        val input = EditText(this).apply {
-            setText(store.tmdbKey)
-            hint = "TMDB API key"
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-            setSingleLine(true)
-        }
-        val holder = FrameLayout(this).apply { setPadding(u(24), u(8), u(24), 0); addView(input) }
-        dialogBuilder()
-            .setTitle("Extra artwork from TMDB")
-            .setMessage("Clean backdrops, title logos and short descriptions for films and series from any app. " +
-                "It needs your own free API key from themoviedb.org (Settings > API). The titles on your home screen are sent to TMDB to find them.\n\n" +
-                "This product uses the TMDB API but is not endorsed or certified by TMDB.")
-            .setView(holder)
-            .setPositiveButton("Save") { _, _ ->
-                val k = input.text.toString().trim()
-                store.tmdbKey = k
-                store.tmdb = k.isNotEmpty()
-                Tmdb.keyRefused = false
+        val sh = sheet("Extra artwork from TMDB", "Clean backdrops, title logos and short descriptions for films and series from any app. " +
+            "It needs your own free API key from themoviedb.org (Settings > API). The titles on your home screen are sent to TMDB to find them.\n\n" +
+            "This product uses the TMDB API but is not endorsed or certified by TMDB.")
+        val input = sh.input(store.tmdbKey, "TMDB API key", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS)
+        sh.button("Cancel")
+        if (store.tmdb) sh.button("Turn off") { store.tmdb = false; refreshPanel?.invoke(); render(null) }
+        sh.button("Save", primary = true) {
+            val k = input.text.toString().trim()
+            store.tmdbKey = k
+            store.tmdb = k.isNotEmpty()
+            Tmdb.keyRefused = false
+            refreshPanel?.invoke()
+            if (k.isNotEmpty()) Tmdb.check(k) { ok ->
+                Toast.makeText(this, when (ok) { true -> "TMDB artwork is on"; false -> "TMDB did not accept this key"; else -> "Could not reach TMDB to check the key" }, Toast.LENGTH_LONG).show()
                 refreshPanel?.invoke()
-                if (k.isNotEmpty()) Tmdb.check(k) { ok ->
-                    Toast.makeText(this, when (ok) { true -> "TMDB artwork is on"; false -> "TMDB did not accept this key"; else -> "Could not reach TMDB to check the key" }, Toast.LENGTH_LONG).show()
-                    refreshPanel?.invoke()
-                    if (ok == true) render(null)
-                }
+                if (ok == true) render(null)
             }
-            .setNeutralButton("Turn off") { _, _ -> store.tmdb = false; refreshPanel?.invoke(); render(null) }
-            .setNegativeButton("Cancel", null)
-            .show()
+        }.open()
     }
 
     private fun askHidden() {
@@ -1219,18 +1184,17 @@ class MainActivity : Activity() {
             Toast.makeText(this, "No hidden apps", Toast.LENGTH_SHORT).show()
             return
         }
-        val checked = BooleanArray(list.size) { true }
-        dialogBuilder()
-            .setTitle("Hidden apps (untick to restore)")
-            .setMultiChoiceItems(list.map { it.label }.toTypedArray(), checked) { _, i, c -> checked[i] = c }
-            .setPositiveButton("Done") { _, _ ->
-                val restore = list.filterIndexed { i, _ -> !checked[i] }.map { it.key }.toSet()
+        val keep = BooleanArray(list.size) { true }
+        val sh = sheet("Hidden apps", "Press OK on an app to bring it back to the home screen.")
+        for ((i, e) in list.withIndex()) sh.item(e.label, { if (keep[i]) "Hidden" else "Back on the home" }, close = false) { keep[i] = !keep[i] }
+        sh.button("Cancel")
+            .button("Done", primary = true) {
+                val restore = list.filterIndexed { i, _ -> !keep[i] }.map { it.key }.toSet()
                 store.hidden = store.hidden.filter { it !in restore }
                 render(null)
                 refreshPanel?.invoke()
             }
-            .setNegativeButton("Cancel", null)
-            .show()
+            .open()
     }
 
     // ---------------------------------------------------------------- what the apps publish
