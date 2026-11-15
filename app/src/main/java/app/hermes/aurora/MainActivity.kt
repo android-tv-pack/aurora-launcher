@@ -183,6 +183,7 @@ class MainActivity : Activity() {
 
     /** The AirPlay receiver is built in: opening Aurora (and boot, via its BootReceiver) makes the TV visible to iPhones/Macs. */
     private fun startAirPlay() {
+        if (BuildConfig.DEBUG) return      // a debug build leaves the receiver (and its ports) to the installed release
         val p = getSharedPreferences(io.github.jqssun.airplay.Prefs.NAME, MODE_PRIVATE)
         if (!p.getBoolean(io.github.jqssun.airplay.Prefs.AUTO_START, io.github.jqssun.airplay.Prefs.DEF_AUTO_START)) return
         try {
@@ -1064,6 +1065,7 @@ class MainActivity : Activity() {
 
     /** keeps the accessibility service in line with the setting (it is switched off when an app is force-stopped) */
     private fun syncHomeGuard() {
+        if (BuildConfig.DEBUG) return      // debug builds have no Home-button service
         if (!HomeGuardService.canSwitch(this)) return
         val want = store.homeButton
         if (want != HomeGuardService.isEnabled(this)) HomeGuardService.setEnabled(this, want)

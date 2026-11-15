@@ -37,6 +37,11 @@ android {
     }
 
     buildTypes {
+        debug {
+            // a debug build installs beside a release build (its own id, label "Aurora Dev") and leaves
+            // the Home button, boot start and the AirPlay receiver to the release build
+            applicationIdSuffix = ".dev"
+        }
         release {
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
@@ -54,6 +59,7 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
     buildFeatures {
+        buildConfig = true
         compose = true
         prefab = true
     }
@@ -106,4 +112,6 @@ dependencies {
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
     implementation(libs.hilt.navigation.compose)
+
+    testImplementation("junit:junit:4.13.2")
 }
