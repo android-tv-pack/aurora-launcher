@@ -3,7 +3,12 @@
 A fast, ad-free, no-account launcher for Android TV and Google TV boxes, with an AirPlay receiver built in.
 It is a personal project, built and tested on a Xiaomi TV Box S (3rd gen, Android 14, 32-bit).
 
-- **Home styles:** Cinema (full-screen "what to watch next" hero), Horizon (large thin clock, round icon row), Command (a half-circle dial). Themes and six icon styles (Original, Round, Mono, Neon, Duotone, Glass), all generated on the device.
+- **Two home styles:**
+  - **Marquee**: the title in focus fills the screen with its artwork. A rail of apps with their names on the left, a hero with Resume / Play and Open, then lanes of titles: one lane across every app that publishes any ("Pick up where you left off" when something can be resumed, "From your apps" otherwise) and one lane per app.
+  - **Drift**: almost nothing on screen. The scene, a large thin clock, the weather and one pill that resumes the newest title (or opens the last-used app). Up, Left, Down and Right slide a panel in: apps, music, watch, pins. Back, or half a minute without a key press, sends it away again.
+- **Pins:** hold OK on an app or on a title and choose Pin. Pinned apps come first; pinned titles get their own lane, and both wait in Drift's pins panel.
+- **Night dimming:** at night (23:00 to 07:00, or hours you choose, or off) the home is dimmed; any key brightens it for a few seconds.
+- Themes and six icon styles (Original, Round, Mono, Neon, Duotone, Glass), all generated on the device. App names are always shown next to the icons.
 - **Now Playing:** any app with a media session (Spotify, YouTube Music, VLC, AirPlay ...) gets a card with cover, progress and Prev / Play-Pause / Next / Stop.
 - **Spotify shelves:** playlists, albums and artists from Spotify's own Android TV home channel, opened by deep link (no account or API key needed inside Aurora).
 - **Music visualizer** that follows the audio output and takes its colours from the playing cover: Flow, Orb, Stardust, Silk, Pixels, Wave, and the scenes Desert, Cyberpunk, Tron Legacy, Matrix, Blade Runner and Interstellar (a ray-traced black hole). Optional auto-rotation per track or on a timer.
@@ -31,12 +36,14 @@ The first build compiles FFmpeg, OpenSSL and UxPlay from source, which takes sev
 
 The build targets only `armeabi-v7a` (32-bit); add `arm64-v8a` to `abiFilters` in `app/build.gradle.kts` for a 64-bit device.
 
+`./gradlew assembleDebug` builds **Aurora Dev** (`app.hermes.aurora.dev`), which installs beside a release build and keeps its own settings. It leaves the Home button, the start at boot and the AirPlay receiver to the release build. `./gradlew testDebugUnitTest` runs the unit tests of the home logic (lanes, night hours, pins, style migration).
+
 ## Install
 
 1. Download **Aurora.apk** from the [latest release](https://github.com/android-tv-pack/aurora-launcher/releases/latest).
    Direct link, for the *Downloader* app on the TV: `https://github.com/android-tv-pack/aurora-launcher/releases/latest/download/Aurora.apk`
 2. Put it on the TV and open it: with a file manager app, with the *Downloader* app (enter the release address), or from a USB stick. Android asks once to allow installs from that app.
-3. Open Aurora. Press INFO (or the on-screen "Customize" pill) to change styles, themes, icons, visualizer and screensaver. No MENU key needed.
+3. Open Aurora. Press INFO or MENU to change the style, theme, icons, visualizer, screensaver and night dimming. Without those keys: "Customize" is the last entry of the app rail in Marquee, and sits in the apps panel (Up) in Drift.
 
 To update, install the new APK over the old one: settings and hidden apps are kept, because every release is signed with the same key. (If you build and sign it yourself, remove the old copy first, as the signature differs.)
 
@@ -53,7 +60,7 @@ Android does not let an app grant itself these permissions, and there is no prom
 |---|---|
 | Visualizer that reacts to the music (listens to the audio output, not a microphone) | `adb shell pm grant app.hermes.aurora android.permission.RECORD_AUDIO` |
 | Now Playing card with Prev / Pause / Next / Stop | `adb shell cmd notification allow_listener app.hermes.aurora/app.hermes.aurora.MediaListener` |
-| "Resume" row and Spotify shelves | `adb shell pm grant app.hermes.aurora android.permission.READ_TV_LISTINGS` |
+| Titles from your apps (the lanes, Resume, Spotify shelves) | `adb shell pm grant app.hermes.aurora android.permission.READ_TV_LISTINGS` |
 | Home button opens Aurora (Aurora switches its own accessibility service on) | `adb shell pm grant app.hermes.aurora android.permission.WRITE_SECURE_SETTINGS` |
 | AirPlay screen over other apps, and its notification | `adb shell appops set app.hermes.aurora SYSTEM_ALERT_WINDOW allow` and `adb shell pm grant app.hermes.aurora android.permission.POST_NOTIFICATIONS` |
 
@@ -69,6 +76,8 @@ The grants survive updates. Do not `pm clear` Aurora: that wipes the hidden apps
 - The real remote's Home key and hold-Home were only verified through the redirect path, not on a physical remote press.
 - Visualizers were checked on screen with generated test tracks, not judged over long listening.
 - YouTube Music publishes no playlists to the TV home, so only Now Playing works for it.
+- The lanes show only what apps publish to Android TV's home (Watch Next and their preview channels); an app that publishes nothing has no lane, and its hero shows its name and an Open button.
+- There is no "From the start" button: Android TV gives a launcher the link to a title, but no way to ask the app to restart it.
 
 ## Support
 
