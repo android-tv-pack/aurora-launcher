@@ -90,12 +90,29 @@ internal object Tmdb {
         imgs.sortedWith(compareByDescending<Img> { it.lang == null }.thenByDescending { it.width >= 1920 }.thenByDescending { it.vote })
             .firstOrNull()?.path
 
-    /** the title's logo: in the viewer's language, else English, else one without a language; never an SVG */
-    fun pickLogo(imgs: List<Img>, lang: String): String? {
+    /** the title's logo: in the first of [langs] that has one, else one without a language; never an SVG */
+    fun pickLogo(imgs: List<Img>, langs: List<String>): String? {
         val ok = imgs.filter { !it.path.endsWith(".svg", true) }
-        fun rank(i: Img) = when (i.lang) { lang -> 0; "en" -> 1; null -> 2; else -> 3 }
-        return ok.filter { rank(it) < 3 }.sortedWith(compareBy<Img> { rank(it) }.thenByDescending { it.vote }).firstOrNull()?.path
+        fun rank(i: Img) = if (i.lang == null) langs.size else langs.indexOf(i.lang).let { if (it < 0) Int.MAX_VALUE else it }
+        return ok.filter { rank(it) != Int.MAX_VALUE }.sortedWith(compareBy<Img> { rank(it) }.thenByDescending { it.vote }).firstOrNull()?.path
     }
+
+    /**
+     * An app may name a title in another language than the box is set to (a Russian service on an English box).
+     * [names] are a candidate's names in every language TMDB has (language to name; "" for a name without one):
+     * the language in which it is called [title], or null when it is not this title.
+     */
+    fun matchLang(names: List<Pair<String, String>>, title: String): String? {
+        val want = norm(cleanTitle(title))
+        if (want.isEmpty()) return null
+        return names.firstOrNull { norm(it.second) == want }?.first
+    }
+
+    /** the candidates worth a closer look when no name was equal: the first few of the stated kind (and, for a film, year) */
+    fun candidates(hits: List<Hit>, kind: Int, year: Int, max: Int = 3): List<Hit> = hits.filter { h ->
+        (kind != KIND_MOVIE || !h.tv) && (kind !in KIND_SERIES..KIND_EPISODE || h.tv) &&
+            (kind != KIND_MOVIE || year <= 0 || h.year <= 0 || kotlin.math.abs(h.year - year) <= 1)
+    }.take(max)
 
     /** "2002  ·  Crime, Drama  ·  ★ 8.6" from what is known */
     fun metaLine(year: Int, genres: List<String>, rating: Double, votes: Int): String = listOfNotNull(
@@ -104,7 +121,7 @@ internal object Tmdb {
         if (rating > 0 && votes >= 20) "★ " + String.format(Locale.US, "%.1f", rating) else null
     ).joinToString("  ·  ")
 
-    fun cacheKey(title: String, kind: Int, lang: String) = norm(cleanTitle(title)) + "|" + (if (kind == KIND_MOVIE) "m" else if (kind in KIND_SERIES..KIND_EPISODE) "t" else "x") + "|" + lang
+    fun cacheKey(title: String, kind: Int, lang: String) = "2|" + norm(cleanTitle(title)) + "|" + (if (kind == KIND_MOVIE) "m" else if (kind in KIND_SERIES..KIND_EPISODE) "t" else "x") + "|" + lang
 
     // ---------------------------------------------------------------- the service
 
@@ -197,6 +214,24 @@ internal object Tmdb {
         return out
     }
 
+    /** every name TMDB has for a title: its translations (language to name) and its alternative titles ("" to name) */
+    private fun allNames(d: JSONObject): List<Pair<String, String>> {
+        val out = ArrayList<Pair<String, String>>()
+        d.optJSONObject("translations")?.optJSONArray("translations")?.let { a ->
+            for (i in 0 until a.length()) {
+                val o = a.optJSONObject(i) ?: continue
+                val data = o.optJSONObject("data") ?: continue
+                val n = data.optString("title").ifEmpty { data.optString("name") }
+                if (n.isNotEmpty()) out.add(o.optString("iso_639_1") to n)
+            }
+        }
+        d.optJSONObject("alternative_titles")?.let { alt ->
+            val a = alt.optJSONArray("titles") ?: alt.optJSONArray("results") ?: return@let
+            for (i in 0 until a.length()) a.optJSONObject(i)?.optString("title")?.let { if (it.isNotEmpty()) out.add("" to it) }
+        }
+        return out
+    }
+
     private fun fetch(key: String, title: String, kind: Int, year: Int): Extra? {
         val l = lang()
         val q = "query=" + URLEncoder.encode(cleanTitle(title), "UTF-8") + "&language=$l&include_adult=false"
@@ -206,12 +241,30 @@ internal object Tmdb {
             else -> "/search/multi" to null
         }
         val found = get(key, path, q) ?: throw java.io.IOException("refused")
-        val hit = pick(hits(found.optJSONArray("results"), forceTv), title, kind, year) ?: return null
-        val d = get(key, (if (hit.tv) "/tv/" else "/movie/") + hit.id, "language=$l&append_to_response=images&include_image_language=$l,en,null")
-            ?: throw java.io.IOException("refused")
+        val all = hits(found.optJSONArray("results"), forceTv)
+        fun details(h: Hit, more: String) = get(key, (if (h.tv) "/tv/" else "/movie/") + h.id,
+            "language=$l&append_to_response=images$more&include_image_language=$l,en,null") ?: throw java.io.IOException("refused")
+        var hit = pick(all, title, kind, year)
+        var d: JSONObject? = null
+        var via: String? = null         // the language the app named the title in, when it is not the box's
+        if (hit != null) d = details(hit, "")
+        else for (h in candidates(all, kind, year)) {
+            // no equal name in the box's language: is one of the first results called this in another language?
+            val dd = details(h, ",translations,alternative_titles")
+            val lg = matchLang(allNames(dd), title) ?: continue
+            hit = h; d = dd; via = lg.ifEmpty { null }
+            break
+        }
+        if (hit == null || d == null) return null
         val im = d.optJSONObject("images")
         val back = pickBackdrop(imgs(im?.optJSONArray("backdrops"))) ?: d.optString("backdrop_path").ifEmpty { null }
-        val logo = pickLogo(imgs(im?.optJSONArray("logos")), l)
+        var logos = imgs(im?.optJSONArray("logos"))
+        if (via != null && via != l && via != "en") {
+            // the logo in the language the app uses for this title
+            get(key, (if (hit.tv) "/tv/" else "/movie/") + hit.id + "/images", "include_image_language=$via,$l,en,null")
+                ?.let { logos = imgs(it.optJSONArray("logos")) }
+        }
+        val logo = pickLogo(logos, listOfNotNull(via, l, "en").distinct())
         val genres = ArrayList<String>()
         d.optJSONArray("genres")?.let { g -> for (i in 0 until g.length()) g.optJSONObject(i)?.optString("name")?.let { if (it.isNotEmpty()) genres.add(it) } }
         val meta = metaLine(year(d.optString(if (hit.tv) "first_air_date" else "release_date")), genres, d.optDouble("vote_average", 0.0), d.optInt("vote_count"))
@@ -270,7 +323,7 @@ internal object Tmdb {
             var ok = true
             val r: Extra? = try { fetch(key, item.title, item.type, item.year) } catch (e: Exception) { ok = false; null }
             if (ok) { store(app, k, r); synchronized(mem) { mem[k] = r } }       // a failed request is asked again later
-            if (BuildConfig.DEBUG) android.util.Log.d("AuroraTmdb", "${item.title} -> ${if (!ok) "failed" else if (r == null) "not found" else r.meta}")
+            android.util.Log.d("AuroraTmdb", "${item.title} -> ${if (!ok) "failed" else if (r == null) "not found" else r.meta}")
             main.post {
                 val l = synchronized(waiting) { waiting.remove(k) } ?: return@post
                 for (c in l) c(r)

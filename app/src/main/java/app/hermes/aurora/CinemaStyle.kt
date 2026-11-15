@@ -355,7 +355,8 @@ internal class CinemaStyle(a: MainActivity) : HomeStyle(a) {
     /** TMDB's logo, line and description for the item on screen (its backdrop is handled where the picture loads) */
     private fun applyExtra(item: TvFeed.Item, x: Tmdb.Extra) {
         if (x.meta.isNotEmpty()) { meta.text = x.meta; meta.visibility = View.VISIBLE }
-        if (x.overview.isNotEmpty()) { desc.text = x.overview; desc.visibility = View.VISIBLE }
+        // the app's own description stays (it is in the app's language); TMDB's fills in when the app gives none
+        if (item.desc.isEmpty() && x.overview.isNotEmpty()) { desc.text = x.overview; desc.visibility = View.VISIBLE }
         val l = x.logo ?: return
         Images.load(a, l, 600) { bmp ->
             if (shown !== item || bmp == null) return@load

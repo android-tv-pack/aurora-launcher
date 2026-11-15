@@ -62,9 +62,27 @@ class TmdbTest {
 
     @Test fun theLogoFollowsTheLanguage() {
         val imgs = listOf(Tmdb.Img("/en.png", "en", 500, 5.0), Tmdb.Img("/ru.png", "ru", 500, 1.0), Tmdb.Img("/de.png", "de", 500, 9.0), Tmdb.Img("/ru.svg", "ru", 500, 9.0))
-        assertEquals("/ru.png", Tmdb.pickLogo(imgs, "ru"))
-        assertEquals("/en.png", Tmdb.pickLogo(imgs, "ka"))
-        assertNull(Tmdb.pickLogo(listOf(Tmdb.Img("/de.png", "de", 500, 9.0)), "en"))
+        assertEquals("/ru.png", Tmdb.pickLogo(imgs, listOf("ru", "en")))
+        assertEquals("/en.png", Tmdb.pickLogo(imgs, listOf("ka", "en")))
+        // the language the app named the title in comes before the box's
+        assertEquals("/ru.png", Tmdb.pickLogo(imgs, listOf("ru", "en", "en").distinct()))
+        assertNull(Tmdb.pickLogo(listOf(Tmdb.Img("/de.png", "de", 500, 9.0)), listOf("en")))
+        // a logo without a language is the last resort
+        assertEquals("/plain.png", Tmdb.pickLogo(listOf(Tmdb.Img("/plain.png", null, 500, 1.0), Tmdb.Img("/de.png", "de", 500, 9.0)), listOf("en")))
+    }
+
+    @Test fun aTitleNamedInAnotherLanguageIsStillFound() {
+        val names = listOf("en" to "My Summer in Provence", "ru" to "Каникулы в Провансе", "" to "Avis de mistral")
+        assertEquals("ru", Tmdb.matchLang(names, "Каникулы в Провансе"))
+        assertEquals("", Tmdb.matchLang(names, "avis de mistral (2014)"))
+        assertNull(Tmdb.matchLang(names, "Каникулы"))
+    }
+
+    @Test fun onlyTheFirstFewOfTheRightKindAreLookedAtCloser() {
+        val hits = listOf(hit(1, true, 2014, 9.0, "a"), hit(2, false, 2014, 8.0, "b"), hit(3, false, 1990, 7.0, "c"), hit(4, false, 2015, 6.0, "d"), hit(5, false, 2014, 5.0, "e"), hit(6, false, 2014, 4.0, "f"))
+        assertEquals(listOf(1, 2, 3), Tmdb.candidates(hits, Tmdb.KIND_UNKNOWN, 0).map { it.id })
+        assertEquals(listOf(2, 4, 5), Tmdb.candidates(hits, Tmdb.KIND_MOVIE, 2014).map { it.id })
+        assertEquals(listOf(1), Tmdb.candidates(hits, Tmdb.KIND_EPISODE, 2014).map { it.id })
     }
 
     @Test fun theLineSaysOnlyWhatIsKnown() {
