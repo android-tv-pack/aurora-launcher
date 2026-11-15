@@ -183,7 +183,8 @@ class MainActivity : Activity() {
         NowPlaying.start(this)
         AdBlock.ensure(this, store)
         if (Tmdb.takeDroppedKey(this, store)) dirty = true
-        Iptv.takeDropped(this, store)
+        store.dropPlaylist()
+        if (Iptv.takeDropped(this, store)) syncHomeGuard()
         Iptv.refresh(this, store, false) { refreshPanel?.invoke(); if (Iptv.stamp(store) != tvStamp) loadFeed() }
         lastInteraction = android.os.SystemClock.elapsedRealtime()
         handler.removeCallbacks(saverTick)
@@ -772,7 +773,8 @@ class MainActivity : Activity() {
     private fun syncHomeGuard() {
         if (BuildConfig.DEBUG) return      // debug builds have no Home-button service
         if (!HomeGuardService.canSwitch(this)) return
-        val want = store.homeButton
+        // the same service notes the channel the IPTV app shows (TV channels), also with the Home button left alone
+        val want = store.homeButton || Iptv.on(store)
         if (want != HomeGuardService.isEnabled(this)) HomeGuardService.setEnabled(this, want)
     }
 
@@ -865,11 +867,6 @@ class MainActivity : Activity() {
                 store.pauseOnSwitch = !store.pauseOnSwitch
             },
             Row("TV channels", { Iptv.label(store) }) { askIptv() },
-            Row("Channel group", { Iptv.groupLabel(store) }, { Iptv.on(store) && Iptv.groupNames().size > 1 }) { d ->
-                val g = Iptv.groupNames()
-                store.iptvGroup = g[(g.indexOf(Iptv.groupLabel(store)) + d + g.size) % g.size]
-                loadFeed()
-            },
             Row("Channels open in", { iptvApp()?.label ?: "" }, { Iptv.on(store) }) { d ->
                 val hidden = store.hidden.toSet()
                 val l = apps.filter { it.key !in hidden && !it.key.endsWith("/googletv") && it.pkg != packageName }.distinctBy { it.pkg }
@@ -1020,37 +1017,33 @@ class MainActivity : Activity() {
             .show()
     }
 
-    /** the user's own IPTV playlist; typed here, or dropped as a file (see Iptv.takeDropped) */
+    /** recently watched TV channels need the link of a programme guide; typed here, or dropped as a file (see Iptv.takeDropped) */
     private fun askIptv() {
-        fun field(value: String, hintText: String) = EditText(this).apply {
-            setText(value)
-            hint = hintText
+        val url = EditText(this).apply {
+            setText(store.iptvGuide)
+            hint = "Programme guide link (.xml or .xml.gz)"
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
             setSingleLine(true)
         }
-        val url = field(store.iptvUrl, "Playlist link (.m3u / .m3u8)")
-        val extra = field(store.iptvExtra, "Optional: a playlist with logos and guide")
-        val holder = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(u(24), u(8), u(24), 0)
-            addView(url); addView(extra)
-        }
+        val holder = FrameLayout(this).apply { setPadding(u(24), u(8), u(24), 0); addView(url) }
         dialogBuilder()
             .setTitle("TV channels")
-            .setMessage("Shows the channels of your IPTV playlist on the home, with logos and what is on now when the playlist (or the optional second one) carries them. " +
-                "A channel opens your IPTV app. The link stays on this device.")
+            .setMessage("Shows the five channels you watched last, with their logos and what is on now and next, taken from your programme guide (XMLTV). " +
+                "To know what you watch, Aurora reads the channel name your IPTV app shows on screen. It looks only at that app, only for channel names, and nothing leaves this device. " +
+                "A channel opens your IPTV app.")
             .setView(holder)
             .setPositiveButton("Save") { _, _ ->
-                val changed = url.text.toString().trim() != store.iptvUrl || extra.text.toString().trim() != store.iptvExtra
-                store.iptvUrl = url.text.toString()
-                store.iptvExtra = extra.text.toString()
-                store.iptv = store.iptvUrl.isNotEmpty()
+                val v = url.text.toString().trim()
+                val changed = v != store.iptvGuide
+                store.iptvGuide = v
+                store.iptv = v.isNotEmpty()
                 if (changed) Iptv.forget(this)
+                syncHomeGuard()
                 refreshPanel?.invoke()
                 loadFeed()
                 Iptv.refresh(this, store, changed) { refreshPanel?.invoke(); if (Iptv.stamp(store) != tvStamp) loadFeed() }
             }
-            .setNeutralButton("Turn off") { _, _ -> store.iptv = false; refreshPanel?.invoke(); loadFeed() }
+            .setNeutralButton("Turn off") { _, _ -> store.iptv = false; syncHomeGuard(); refreshPanel?.invoke(); loadFeed() }
             .setNegativeButton("Cancel", null)
             .show()
     }
@@ -1141,6 +1134,8 @@ class MainActivity : Activity() {
     private fun withChannels(f: Map<String, List<TvFeed.Item>>): Map<String, List<TvFeed.Item>> {
         tvStamp = Iptv.stamp(store)
         val app = iptvApp() ?: return f
+        // the screen watcher runs outside this activity: it needs the app by name
+        if (Iptv.on(store) && store.iptvApp != app.pkg) store.iptvApp = app.pkg
         val ch = Iptv.items(store, app.pkg)
         if (ch.isEmpty()) return f
         val out = LinkedHashMap(f)

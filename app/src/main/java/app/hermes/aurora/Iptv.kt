@@ -3,8 +3,6 @@ package app.hermes.aurora
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
-import org.json.JSONArray
-import org.json.JSONObject
 import java.io.File
 import java.io.InputStream
 import java.net.HttpURLConnection
@@ -15,95 +13,27 @@ import java.util.Locale
 import java.util.zip.GZIPInputStream
 
 /**
- * TV channels on the home (optional, off by default). IPTV apps publish nothing to the TV home, so Aurora reads
- * the user's own playlist (M3U) instead and shows the channels of one group with their logos and, when a
- * programme guide (XMLTV) is known, what is on now and next. Pressing a channel opens the IPTV app the user
- * chose: such apps accept no link to a single channel.
+ * Recently watched TV channels on the home (optional, off by default).
  *
- * Nothing here knows a particular provider or app. Logos and the guide come from the playlist itself or, when
- * it has none, from an optional second playlist that carries them (matched by the channel's number in its
- * address, else by its name).
+ * IPTV apps publish nothing to the TV home and say nothing about what they play. They do show the channel's name
+ * on screen when a channel is chosen, and that is what this uses: while the IPTV app the user chose is in front,
+ * Aurora's accessibility service looks at the text on its screen, and a text that is the name of exactly one
+ * channel of the programme guide, staying for half a minute, is noted as watched. The last five are shown under
+ * that app with the channel's logo and what is on now and next, both from the guide (XMLTV) whose link the user
+ * gives. Pressing one opens the app (such apps take no link to a single channel).
  *
- * The playlist link contains the user's subscription key: it stays in Aurora's private settings, is left out of
- * the settings backup, is never logged, and the channels' stream addresses are not kept at all.
+ * Nothing here knows a particular app or provider. Only the chosen app's screen is looked at, only for channel
+ * names, and nothing leaves the device.
  */
 internal object Iptv {
 
     // ---------------------------------------------------------------- plain logic (unit-tested)
 
-    class Channel(val name: String, val group: String, val sid: String, var logo: String, var tvgId: String)
-    class Playlist(val channels: List<Channel>, val guideUrl: String)
     class Prog(val start: Long, val stop: Long, val title: String)
-
-    private val attr = Regex("""([A-Za-z][A-Za-z0-9-]*)="([^"]*)"""")
-
-    /** the channel's number in its stream address (".../iptv/KEY/19241/index.m3u8" -> "19241"), "" when it has none */
-    fun streamId(url: String): String {
-        val path = url.substringBefore('?').trimEnd('/')
-        val parts = path.split('/')
-        for (i in parts.indices.reversed()) {
-            val p = parts[i].substringBefore('.')
-            if (i >= 4 && p.length in 1..9 && p.all { it.isDigit() }) return p
-        }
-        return ""
-    }
-
-    fun parseM3u(text: String): Playlist {
-        val out = ArrayList<Channel>()
-        var guide = ""
-        var name: String? = null
-        var group = ""
-        var logo = ""
-        var id = ""
-        for (raw in text.lineSequence()) {
-            val l = raw.trim().trimStart('\uFEFF')
-            when {
-                l.startsWith("#EXTM3U") -> {
-                    val a = attr.findAll(l).associate { it.groupValues[1].lowercase(Locale.ROOT) to it.groupValues[2] }
-                    guide = (a["url-tvg"] ?: a["x-tvg-url"] ?: a["tvg-url"] ?: "").split(',').first().trim()
-                }
-                l.startsWith("#EXTINF") -> {
-                    val a = attr.findAll(l).associate { it.groupValues[1].lowercase(Locale.ROOT) to it.groupValues[2] }
-                    // the name follows the first comma behind the attributes (a name may contain commas itself)
-                    val from = attr.findAll(l).lastOrNull()?.range?.last ?: 0
-                    val comma = l.indexOf(',', from)
-                    name = (if (comma >= 0) l.substring(comma + 1) else a["tvg-name"] ?: "").trim()
-                    group = a["group-title"] ?: ""
-                    logo = a["tvg-logo"] ?: ""
-                    id = a["tvg-id"] ?: ""
-                }
-                l.startsWith("#EXTGRP:") -> if (group.isEmpty()) group = l.substring(8).trim()
-                l.isEmpty() || l.startsWith("#") -> {}
-                else -> {
-                    val n = name
-                    if (!n.isNullOrEmpty()) out.add(Channel(n, group, streamId(l), logo, id))
-                    name = null; group = ""; logo = ""; id = ""
-                }
-            }
-        }
-        return Playlist(out, guide)
-    }
-
-    /** logos, guide ids and the guide's address that [own] lacks, taken from [other]: by channel number, else by name */
-    fun merge(own: Playlist, other: Playlist?): Playlist {
-        if (other == null) return own
-        val bySid = HashMap<String, Channel>()
-        val byName = HashMap<String, Channel>()
-        for (c in other.channels) {
-            if (c.sid.isNotEmpty()) bySid.putIfAbsent(c.sid, c)
-            byName.putIfAbsent(Tmdb.norm(c.name), c)
-        }
-        for (c in own.channels) {
-            if (c.logo.isNotEmpty() && c.tvgId.isNotEmpty()) continue
-            val o = (if (c.sid.isNotEmpty()) bySid[c.sid] else null) ?: byName[Tmdb.norm(c.name)] ?: continue
-            if (c.logo.isEmpty()) c.logo = o.logo
-            if (c.tvgId.isEmpty()) c.tvgId = o.tvgId
-        }
-        return Playlist(own.channels, own.guideUrl.ifEmpty { other.guideUrl })
-    }
-
-    /** the groups in the order the playlist names them */
-    fun groups(channels: List<Channel>): List<String> = channels.map { it.group }.filter { it.isNotEmpty() }.distinct()
+    /** a channel of the guide: its id, its logo and the names it is known by */
+    class Chan(val id: String, val icon: String, val names: List<String>)
+    /** a channel that was watched: the guide's id and the name the app showed */
+    class Recent(val id: String, val name: String)
 
     /** XMLTV time "20261107235500 +0300" as milliseconds, 0 when it is not one */
     fun xmltvTime(s: String): Long {
@@ -133,6 +63,8 @@ internal object Iptv {
         if (s.indexOf('&') < 0) s else s.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&apos;", "'").replace("&#39;", "'").replace("&amp;", "&")
 
     private val titleTag = Regex("""<title[^>]*>([^<]*)</title>""")
+    private val displayName = Regex("""<display-name[^>]*>([^<]*)</display-name>""")
+    private val iconTag = Regex("""<icon[^>]*\ssrc="([^"]*)"""")
 
     /** value of attribute [name] in an opening tag */
     fun attrOf(tag: String, name: String): String {
@@ -156,6 +88,16 @@ internal object Iptv {
         return ch to Prog(start, stop, unescape(title))
     }
 
+    /** a "<channel ...>...</channel>" block of a guide, or null */
+    fun chanOf(block: String): Chan? {
+        val end = block.indexOf('>')
+        if (end < 0) return null
+        val id = attrOf(block.substring(0, end), "id")
+        if (id.isEmpty()) return null
+        val names = displayName.findAll(block).map { unescape(it.groupValues[1].trim()) }.filter { it.isNotEmpty() }.toList()
+        return Chan(id, iconTag.find(block)?.groupValues?.get(1).orEmpty(), names)
+    }
+
     /** what is on at [now] and what follows */
     fun nowNext(list: List<Prog>?, now: Long): Pair<Prog?, Prog?> {
         if (list == null) return null to null
@@ -170,12 +112,57 @@ internal object Iptv {
         next?.let { "Next: " + it.title + (if (cur == null) ", " + clock(it.start) else "") }
     ).joinToString("  ·  ")
 
-    /** the channels the home shows: those of [group] (the first group when it is unknown), at most [max] */
-    fun shown(channels: List<Channel>, group: String, max: Int = 24): List<Channel> {
-        val gs = groups(channels)
-        if (gs.isEmpty()) return channels.take(max)
-        val g = if (group in gs) group else gs.first()
-        return channels.filter { it.group == g }.take(max)
+    /** for comparing a text on screen with the guide's channel names; "" for what can't be a name (numbers, clock times) */
+    fun nameKey(text: String): String {
+        val t = text.trim()
+        if (t.length < 2 || t.length > 60 || t.none { it.isLetter() }) return ""
+        return Tmdb.norm(t)
+    }
+
+    /**
+     * The channels whose names are on screen: (id, the text as shown). One name on screen is the channel that
+     * plays (the app's info bar); several are a channel list, which says nothing about what plays.
+     */
+    fun onScreen(texts: List<String>, idOf: (String) -> String?): List<Recent> {
+        val out = LinkedHashMap<String, Recent>()
+        for (t in texts) {
+            val k = nameKey(t)
+            if (k.isEmpty()) continue
+            val id = idOf(k) ?: continue
+            out.putIfAbsent(id, Recent(id, t.trim()))
+        }
+        return out.values.toList()
+    }
+
+    /** how long a channel must stay on before it counts as watched (zapping through channels does not) */
+    const val WATCHED_MS = 30_000L
+    const val KEEP = 5
+
+    /** Notes what the screen showed, look by look, and says when a channel has been watched. */
+    class Watch {
+        private var cand: Recent? = null
+        private var since = 0L
+        private var told = false
+
+        /** [seen] = the channels named on screen at [now] (see onScreen); returns a channel once, when it counts as watched */
+        fun look(seen: List<Recent>, now: Long): Recent? {
+            if (seen.size == 1 && seen[0].id != cand?.id) { cand = seen[0]; since = now; told = false }
+            val c = cand
+            if (c != null && !told && now - since >= WATCHED_MS) { told = true; return c }
+            return null
+        }
+
+        /** the app left the screen */
+        fun reset() { cand = null; told = false }
+    }
+
+    /** the list of watched channels with [r] first, each channel once, at most [KEEP] */
+    fun pushed(list: List<Recent>, r: Recent): List<Recent> = (listOf(r) + list.filter { it.id != r.id }).take(KEEP)
+
+    fun encode(list: List<Recent>): List<String> = list.map { it.id + "\t" + it.name.replace('\t', ' ').replace('\n', ' ') }
+    fun decode(lines: List<String>): List<Recent> = lines.mapNotNull { l ->
+        val i = l.indexOf('\t')
+        if (i <= 0 || i == l.length - 1) null else Recent(l.substring(0, i), l.substring(i + 1))
     }
 
     /**
@@ -246,204 +233,179 @@ internal object Iptv {
         }
     }
 
-    private val displayName = Regex("""<display-name[^>]*>([^<]*)</display-name>""")
-
-    /** the names a guide knows a channel by: (id, names) of a "<channel ...>" block */
-    fun channelOf(block: String): Pair<String, List<String>>? {
-        val end = block.indexOf('>')
-        if (end < 0) return null
-        val id = attrOf(block.substring(0, end), "id")
-        if (id.isEmpty()) return null
-        return id to displayName.findAll(block).map { unescape(it.groupValues[1].trim()) }.toList()
-    }
-
     // ---------------------------------------------------------------- the service
 
-    private const val LIST_MS = 24L * 3600 * 1000
     private const val GUIDE_MS = 12L * 3600 * 1000
-    private const val WINDOW_MS = 24L * 3600 * 1000
+    private const val WINDOW_MS = 30L * 3600 * 1000
     /** Android TV's program type "channel" */
     const val TYPE_CHANNEL = 6
     const val KIND = "TV CHANNEL"
 
     private val main by lazy { Handler(Looper.getMainLooper()) }
-    @Volatile private var channels: List<Channel> = emptyList()
-    @Volatile private var guideUrl = ""
-    @Volatile private var guide: Map<String, List<Prog>> = emptyMap()
-    @Volatile private var listAt = 0L
+    /** the guide's channels: name key -> id, id -> logo */
+    @Volatile private var nameToId: Map<String, String> = emptyMap()
+    @Volatile private var icons: Map<String, String> = emptyMap()
+    /** the programmes of the watched channels only (the whole guide stays in a file) */
+    @Volatile private var progs: Map<String, List<Prog>> = emptyMap()
+    @Volatile private var progsFor = ""
     @Volatile private var guideAt = 0L
     @Volatile private var busy = false
-    @Volatile private var loaded = false
+    @Volatile private var indexed = false
     @Volatile var error = ""
         private set
 
-    fun on(store: Store) = store.iptv && store.iptvUrl.isNotEmpty()
+    fun on(store: Store) = store.iptv && store.iptvGuide.isNotEmpty()
 
     fun label(store: Store): String = when {
         !on(store) -> "Off"
-        channels.isNotEmpty() -> String.format(Locale.US, "%,d channels", channels.size) + (if (busy) "  ·  updating" else "")
-        busy -> "Loading"
+        busy && nameToId.isEmpty() -> "Loading the guide"
+        nameToId.isNotEmpty() -> "On" + (if (busy) "  ·  updating the guide" else "")
         error.isNotEmpty() -> error
         else -> "On"
     }
 
-    fun groupNames(): List<String> = groups(channels)
-    fun groupLabel(store: Store): String = groupNames().let { g -> if (store.iptvGroup in g) store.iptvGroup else g.firstOrNull() ?: "" }
-
-    /** an `iptv-playlist.txt` dropped into the app's files folder: line 1 the playlist link, line 2 (optional) a playlist with logos and guide */
+    /** an `iptv-guide.txt` dropped into the app's files folder: the link of the programme guide (XMLTV) */
     fun takeDropped(ctx: Context, store: Store): Boolean {
-        val f = File(ctx.getExternalFilesDir(null) ?: return false, "iptv-playlist.txt")
+        val f = File(ctx.getExternalFilesDir(null) ?: return false, "iptv-guide.txt")
         if (!f.exists()) return false
-        val lines = try { f.readLines().map { it.trim() }.filter { it.isNotEmpty() } } catch (_: Exception) { emptyList() }
+        val url = try { f.readLines().map { it.trim() }.firstOrNull { it.isNotEmpty() } } catch (_: Exception) { null }
         f.delete()
-        if (lines.isEmpty()) return false
-        store.iptvUrl = lines[0]
-        store.iptvExtra = lines.getOrElse(1) { "" }
+        if (url.isNullOrEmpty()) return false
+        store.iptvGuide = url
         store.iptv = true
         forget(ctx)
         return true
     }
 
+    private fun namesFile(ctx: Context) = File(ctx.filesDir, "tv-channels.tsv")
+    private fun guideFile(ctx: Context) = File(ctx.filesDir, "tv-guide.tsv")
+
     fun forget(ctx: Context) {
-        channels = emptyList(); guide = emptyMap(); guideUrl = ""; listAt = 0; guideAt = 0; loaded = true; error = ""
-        File(ctx.filesDir, "iptv-channels.json").delete()
-        File(ctx.filesDir, "iptv-guide.json").delete()
+        nameToId = emptyMap(); icons = emptyMap(); progs = emptyMap(); progsFor = ""; guideAt = 0; indexed = true; error = ""
+        namesFile(ctx).delete(); guideFile(ctx).delete()
+        // files of the earlier playlist-based version
+        File(ctx.filesDir, "iptv-channels.json").delete(); File(ctx.filesDir, "iptv-guide.json").delete()
     }
 
     private fun http(url: String): InputStream {
-        val c = URL(url).openConnection() as HttpURLConnection
-        c.connectTimeout = 10000
-        c.readTimeout = 30000
-        c.instanceFollowRedirects = true
-        c.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android) Aurora")
-        var code = c.responseCode
-        var conn = c
-        // a redirect from http to https (or back) is not followed by itself
+        var conn = URL(url).openConnection() as HttpURLConnection
         var hops = 0
-        while (code in 301..308 && hops++ < 4) {
-            val to = conn.getHeaderField("Location") ?: break
-            conn.disconnect()
-            conn = URL(URL(conn.url, to).toString()).openConnection() as HttpURLConnection
-            conn.connectTimeout = 10000; conn.readTimeout = 30000
+        while (true) {
+            conn.connectTimeout = 10000
+            conn.readTimeout = 30000
+            conn.instanceFollowRedirects = true
             conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android) Aurora")
-            code = conn.responseCode
-        }
-        if (code != 200) throw java.io.IOException("HTTP $code")
-        return conn.inputStream
-    }
-
-    private fun text(url: String, max: Int = 24 * 1024 * 1024): String {
-        http(url).use { s ->
-            val out = java.io.ByteArrayOutputStream()
-            val b = ByteArray(1 shl 15)
-            while (true) {
-                val n = s.read(b)
-                if (n < 0) break
-                out.write(b, 0, n)
-                if (out.size() > max) throw java.io.IOException("too large")
+            val code = conn.responseCode
+            // a redirect from http to https (or back) is not followed by itself
+            if (code in 301..308 && hops++ < 4) {
+                val to = conn.getHeaderField("Location") ?: throw java.io.IOException("HTTP $code")
+                val next = URL(conn.url, to)
+                conn.disconnect()
+                conn = next.openConnection() as HttpURLConnection
+                continue
             }
-            return out.toString("UTF-8")
+            if (code != 200) throw java.io.IOException("HTTP $code")
+            return conn.inputStream
         }
     }
 
-    // ---- what was read is kept on the box (never the stream addresses)
-
-    private fun saveChannels(ctx: Context) {
-        val a = JSONArray()
-        for (c in channels) a.put(JSONArray().put(c.name).put(c.group).put(c.logo).put(c.tvgId))
-        File(ctx.filesDir, "iptv-channels.json").writeText(JSONObject().put("t", listAt).put("g", guideUrl).put("c", a).toString())
+    /** the guide's channels from the file: first line the time it was read, then "id, logo, names" per line */
+    private fun loadIndex(ctx: Context) {
+        if (indexed) return
+        indexed = true
+        try {
+            val n = HashMap<String, String>()
+            val ic = HashMap<String, String>()
+            namesFile(ctx).bufferedReader().useLines { lines ->
+                for (l in lines) {
+                    val f = l.split('\t')
+                    if (f[0] == "#" && f.size > 1) { guideAt = f[1].toLongOrNull() ?: 0; continue }
+                    if (f.size < 3) continue
+                    if (f[1].isNotEmpty()) ic[f[0]] = f[1]
+                    for (i in 2 until f.size) nameKey(f[i]).let { if (it.isNotEmpty()) n.putIfAbsent(it, f[0]) }
+                }
+            }
+            nameToId = n; icons = ic
+        } catch (_: Exception) {}
     }
 
-    private fun saveGuide(ctx: Context) {
-        val o = JSONObject()
-        for ((id, l) in guide) { val a = JSONArray(); for (p in l) a.put(JSONArray().put(p.start).put(p.stop).put(p.title)); o.put(id, a) }
-        File(ctx.filesDir, "iptv-guide.json").writeText(JSONObject().put("t", guideAt).put("d", o).toString())
+    /** the programmes of [ids] from the guide file */
+    private fun loadProgs(ctx: Context, ids: Set<String>) {
+        val out = HashMap<String, ArrayList<Prog>>()
+        try {
+            guideFile(ctx).bufferedReader().useLines { lines ->
+                for (l in lines) {
+                    val a = l.indexOf('\t')
+                    if (a <= 0 || l.substring(0, a) !in ids) continue
+                    val f = l.split('\t', limit = 4)
+                    if (f.size == 4) out.getOrPut(f[0]) { ArrayList() }.add(Prog(f[1].toLongOrNull() ?: continue, f[2].toLongOrNull() ?: continue, f[3]))
+                }
+            }
+        } catch (_: Exception) {}
+        for (l in out.values) l.sortBy { it.start }
+        progs = out
+        progsFor = ids.sorted().joinToString(",")
     }
 
-    private fun loadSaved(ctx: Context) {
-        if (loaded) return
-        loaded = true
-        try {
-            val o = JSONObject(File(ctx.filesDir, "iptv-channels.json").readText())
-            val a = o.getJSONArray("c")
-            val l = ArrayList<Channel>(a.length())
-            for (i in 0 until a.length()) { val c = a.getJSONArray(i); l.add(Channel(c.getString(0), c.getString(1), "", c.getString(2), c.getString(3))) }
-            channels = l; guideUrl = o.optString("g"); listAt = o.optLong("t")
-        } catch (_: Exception) {}
-        try {
-            val o = JSONObject(File(ctx.filesDir, "iptv-guide.json").readText())
-            val d = o.getJSONObject("d")
-            val m = HashMap<String, List<Prog>>()
-            for (id in d.keys()) { val a = d.getJSONArray(id); val l = ArrayList<Prog>(a.length()); for (i in 0 until a.length()) { val p = a.getJSONArray(i); l.add(Prog(p.getLong(0), p.getLong(1), p.getString(2))) }; m[id] = l }
-            guide = m; guideAt = o.optLong("t")
-        } catch (_: Exception) {}
+    /** the id of the guide's channel that is called [key] (see nameKey), for the screen watcher */
+    fun idOf(ctx: Context, key: String): String? {
+        if (!indexed) loadIndex(ctx.applicationContext)
+        return nameToId[key]
     }
 
     /**
-     * Reads the playlist (once a day) and the guide (twice a day) when they are due; [changed] is called on the
-     * main thread whenever there is something new to show. Runs off the main thread, one at a time.
+     * Reads the guide when it is due (twice a day) into two files, then the programmes of the watched channels
+     * into memory. [changed] is called on the main thread when there is something new to show. One at a time,
+     * off the main thread.
      */
     fun refresh(ctx: Context, store: Store, force: Boolean, changed: () -> Unit) {
         if (!on(store) || busy) return
         busy = true
         val app = ctx.applicationContext
-        val url = store.iptvUrl
-        val extra = store.iptvExtra
+        val url = store.iptvGuide
         Thread({
             try {
                 android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
-                val had = channels.size
-                loadSaved(app)
-                if (channels.size != had) main.post(changed)
+                loadIndex(app)
                 val now = System.currentTimeMillis()
-                if (force || channels.isEmpty() || now - listAt > LIST_MS) {
-                    try {
-                        var p = parseM3u(text(url))
-                        if (p.channels.isEmpty()) throw java.io.IOException("no channels")
-                        if (extra.isNotEmpty() && p.channels.any { it.logo.isEmpty() || it.tvgId.isEmpty() }) {
-                            try { p = merge(p, parseM3u(text(extra))) } catch (_: Exception) {}
-                        }
-                        channels = p.channels; guideUrl = p.guideUrl; listAt = now; error = ""
-                        saveChannels(app)
-                        android.util.Log.i("AuroraTv", "playlist: ${p.channels.size} channels, ${p.channels.count { it.logo.isNotEmpty() }} logos, guide ${if (p.guideUrl.isEmpty()) "none" else "known"}")
-                        main.post(changed)
-                    } catch (e: Exception) {
-                        if (channels.isEmpty()) error = "Could not load the playlist"
-                        android.util.Log.w("AuroraTv", "playlist failed: ${e.javaClass.simpleName}")
-                        main.post(changed)
-                    }
-                }
-                val g = guideUrl
-                if (g.isNotEmpty() && channels.isNotEmpty() && (force || guide.isEmpty() || now - guideAt > GUIDE_MS)) {
+                if (force || nameToId.isEmpty() || !guideFile(app).exists() || now - guideAt > GUIDE_MS) {
+                    val tmpN = File(app.filesDir, "tv-channels.tmp")
+                    val tmpG = File(app.filesDir, "tv-guide.tmp")
                     try {
                         val t0 = android.os.SystemClock.elapsedRealtime()
-                        val ids = HashSet<String>()
-                        val names = HashMap<String, ArrayList<Channel>>()       // channels the playlist gives no guide id: found by name
-                        for (c in channels) if (c.tvgId.isNotEmpty()) ids.add(c.tvgId) else names.getOrPut(Tmdb.norm(c.name)) { ArrayList() }.add(c)
-                        val out = HashMap<String, ArrayList<Prog>>()
+                        var chans = 0
+                        var count = 0
                         val until = now + WINDOW_MS
-                        var named = 0
-                        val raw = http(g)
-                        val input = if (g.substringBefore('?').endsWith(".gz", true)) GZIPInputStream(raw, 1 shl 16) else raw
-                        input.use { s ->
-                            scanGuide(s, { head -> attrOf(head, "channel") in ids }, { block ->
-                                if (names.isNotEmpty()) channelOf(block)?.let { (id, ns) ->
-                                    for (n in ns) names[Tmdb.norm(n)]?.let { l -> for (c in l) if (c.tvgId.isEmpty()) { c.tvgId = id; named++ }; ids.add(id) }
+                        val raw = http(url)
+                        val input = if (url.substringBefore('?').endsWith(".gz", true)) GZIPInputStream(raw, 1 shl 16) else raw
+                        tmpN.bufferedWriter().use { wn ->
+                            wn.write("#\t$now\n")
+                            tmpG.bufferedWriter().use { wg ->
+                                input.use { s ->
+                                    scanGuide(s, { true }, { block ->
+                                        chanOf(block)?.let { c ->
+                                            wn.write(c.id + "\t" + c.icon + "\t" + c.names.joinToString("\t") { it.replace('\t', ' ') } + "\n"); chans++
+                                        }
+                                    }, { block ->
+                                        progOf(block)?.let { (id, p) ->
+                                            if (p.stop > now && p.start < until) { wg.write(id + "\t" + p.start + "\t" + p.stop + "\t" + p.title.replace('\t', ' ').replace('\n', ' ') + "\n"); count++ }
+                                        }
+                                    })
                                 }
-                            }, { block ->
-                                progOf(block)?.let { (id, p) -> if (p.stop > now && p.start < until) out.getOrPut(id) { ArrayList() }.add(p) }
-                            })
+                            }
                         }
-                        for (l in out.values) l.sortBy { it.start }
-                        guide = out; guideAt = now
-                        saveGuide(app)
-                        if (named > 0) saveChannels(app)
-                        android.util.Log.i("AuroraTv", "guide: ${out.size} channels, ${out.values.sumOf { it.size }} programmes, ${(android.os.SystemClock.elapsedRealtime() - t0) / 1000}s")
-                        main.post(changed)
+                        if (chans == 0) throw java.io.IOException("no channels in the guide")
+                        tmpN.renameTo(namesFile(app)); tmpG.renameTo(guideFile(app))
+                        indexed = false; loadIndex(app); progsFor = ""; error = ""
+                        android.util.Log.i("AuroraTv", "guide: $chans channels, $count programmes, ${(android.os.SystemClock.elapsedRealtime() - t0) / 1000}s")
                     } catch (e: Exception) {
+                        tmpN.delete(); tmpG.delete()
+                        if (nameToId.isEmpty()) error = "Could not load the guide"
                         android.util.Log.w("AuroraTv", "guide failed: ${e.javaClass.simpleName}")
                     }
                 }
+                val ids = decode(store.iptvRecent).map { it.id }.toSet()
+                if (ids.sorted().joinToString(",") != progsFor) loadProgs(app, ids)
             } finally {
                 busy = false
                 main.post(changed)
@@ -453,21 +415,27 @@ internal object Iptv {
 
     private val clock = SimpleDateFormat("HH:mm", Locale.US)
 
-    /** the channels of the chosen group as items of the app [pkg] */
+    /** the watched channels, newest first, as items of the app [pkg] */
     fun items(store: Store, pkg: String): List<TvFeed.Item> {
         if (!on(store)) return emptyList()
         val now = System.currentTimeMillis()
-        return shown(channels, store.iptvGroup).filter { it.logo.isNotEmpty() || it.name.isNotEmpty() }.map { c ->
-            val (cur, next) = nowNext(guide[c.tvgId], now)
+        return decode(store.iptvRecent).map { c ->
+            val (cur, next) = nowNext(progs[c.id], now)
             val desc = line(cur, next) { synchronized(clock) { clock.format(Date(it)) } }
-            TvFeed.Item(pkg, c.name, desc, c.logo, false, true, KIND, null, -1f, type = TYPE_CHANNEL)
+            TvFeed.Item(pkg, c.name, desc, icons[c.id].orEmpty(), false, true, KIND, null, -1f, type = TYPE_CHANNEL)
         }
     }
 
-    /** changes when what is on now changes (so the home is rebuilt only then) */
+    /** changes when the watched channels or what is on now on them changes (the home is rebuilt only then) */
     fun stamp(store: Store): String {
         if (!on(store)) return ""
         val now = System.currentTimeMillis()
-        return store.iptvGroup + "|" + channels.size + "|" + shown(channels, store.iptvGroup).joinToString("|") { nowNext(guide[it.tvgId], now).first?.start?.toString() ?: "" }
+        return icons.size.toString() + "|" + progsFor + "|" + decode(store.iptvRecent).joinToString("|") { it.id + ":" + (nowNext(progs[it.id], now).first?.start ?: 0) }
+    }
+
+    /** the watcher noted a channel: it goes first in the list */
+    fun watched(store: Store, r: Recent) {
+        store.iptvRecent = encode(pushed(decode(store.iptvRecent), r))
+        android.util.Log.i("AuroraTv", "watched: a channel was noted (${decode(store.iptvRecent).size} kept)")
     }
 }

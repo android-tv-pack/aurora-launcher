@@ -1,4 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="home_guard_desc">Makes the Home button open the Aurora launcher. It only watches the Home key and which app is on screen; it reads no content.</string>
+    <string name="home_guard_desc">Makes the Home button open the Aurora launcher. It watches the Home key and which app is on screen. With \"TV channels\" switched on it also reads the channel name shown by the one TV app you chose; it looks at no other app, and nothing leaves this device.</string>
 </resources>

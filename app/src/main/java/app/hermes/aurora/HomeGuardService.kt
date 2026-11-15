@@ -17,7 +17,10 @@ import android.view.accessibility.AccessibilityEvent
  *   - takes the Home button before the system sees it and opens Aurora,
  *   - sends you back to Aurora when Google TV's home shows up by itself (after boot, after closing an app),
  *   - HOLD Home (0.7 s) opens the real Google TV home, as does the "Google TV" tile.
- * It only watches window changes and the Home key; it reads no screen content.
+ * It watches window changes and the Home key.
+ *
+ * With "TV channels" switched on it also looks at the text on the screen of the one IPTV app the user chose,
+ * to note the channel that app shows (see Iptv). No other app's screen is looked at.
  */
 class HomeGuardService : AccessibilityService() {
 
@@ -26,6 +29,32 @@ class HomeGuardService : AccessibilityService() {
     private val redirects = ArrayDeque<Long>()
     private var cooldownUntil = 0L
     private val longPress = Runnable { longFired = true; openGoogleTv(this) }
+
+    // ---- TV channels: which channel does the IPTV app show?
+    private val st by lazy { Store(this) }
+    private val watch = Iptv.Watch()
+    private var looking = false
+    private val look = object : Runnable {
+        override fun run() {
+            val pkg = st.iptvApp
+            if (!Iptv.on(st) || pkg.isEmpty() || front != pkg) { watch.reset(); looking = false; return }
+            try {
+                val texts = ArrayList<String>()
+                val root = rootInActiveWindow
+                if (root != null && root.packageName?.toString() == pkg) collect(root, texts, 0)
+                // a screen full of text is a list or a menu, not the bar that names the channel
+                val seen = if (texts.size > 60) emptyList() else Iptv.onScreen(texts) { Iptv.idOf(this@HomeGuardService, it) }
+                watch.look(seen, android.os.SystemClock.elapsedRealtime())?.let { Iptv.watched(st, it) }
+            } catch (_: Exception) {}
+            h.postDelayed(this, 1500)
+        }
+    }
+
+    private fun collect(n: android.view.accessibility.AccessibilityNodeInfo, out: ArrayList<String>, depth: Int) {
+        if (depth > 40 || out.size > 200) return
+        (n.text ?: n.contentDescription)?.toString()?.let { if (it.isNotBlank()) out.add(it) }
+        for (i in 0 until n.childCount) n.getChild(i)?.let { collect(it, out, depth + 1) }
+    }
 
     override fun onServiceConnected() {
         instance = this
@@ -47,6 +76,7 @@ class HomeGuardService : AccessibilityService() {
         val changed = pkg != front
         front = pkg
         if (changed) pauseMusicFor(pkg)
+        if (!looking && pkg == st.iptvApp && Iptv.on(st)) { looking = true; h.postDelayed(look, 1000) }
         if (pkg == GTV) {
             if (!enabled() || gtvMode) return
             goAurora()

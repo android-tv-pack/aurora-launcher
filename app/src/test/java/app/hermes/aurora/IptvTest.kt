@@ -10,59 +10,6 @@ import java.util.zip.GZIPInputStream
 
 class IptvTest {
 
-    private val own = """
-        #EXTM3U
-        #EXTINF:0 tvg-rec="0",First Channel UHD
-        #EXTGRP:news
-        http://host.example/iptv/SECRETKEY/19241/index.m3u8
-        #EXTINF:0 tvg-rec="3",Film, the Channel
-        #EXTGRP:cinema
-        http://host.example/iptv/SECRETKEY/77/index.m3u8
-        #EXTINF:-1,No Number
-        http://host.example/live/stream.m3u8
-    """.trimIndent()
-
-    private val other = """
-        #EXTM3U x-tvg-url="http://guide.example/epg.xml.gz,http://second.example/x.xml"
-        #EXTINF:0 group-title="news" tvg-id="146" tvg-logo="http://guide.example/img/146.png" tvg-rec="0",Первый канал UHD
-        http://localhost/iptv/00000000000000/19241/index.m3u8
-        #EXTINF:0 group-title="x" tvg-id="900" tvg-logo="http://guide.example/img/900.png",no number
-        http://localhost/else.m3u8
-    """.trimIndent()
-
-    @Test fun aPlaylistIsRead() {
-        val p = Iptv.parseM3u(own)
-        assertEquals(listOf("First Channel UHD", "Film, the Channel", "No Number"), p.channels.map { it.name })
-        assertEquals(listOf("news", "cinema", ""), p.channels.map { it.group })
-        assertEquals(listOf("19241", "77", ""), p.channels.map { it.sid })
-        assertEquals("", p.guideUrl)
-        assertEquals(listOf("news", "cinema"), Iptv.groups(p.channels))
-    }
-
-    @Test fun attributesInTheChannelLineAreRead() {
-        val p = Iptv.parseM3u(other)
-        assertEquals("http://guide.example/epg.xml.gz", p.guideUrl)
-        assertEquals("146", p.channels[0].tvgId)
-        assertEquals("http://guide.example/img/146.png", p.channels[0].logo)
-        assertEquals("news", p.channels[0].group)
-    }
-
-    @Test fun logosAndGuideComeFromTheSecondPlaylistByNumberThenByName() {
-        val p = Iptv.merge(Iptv.parseM3u(own), Iptv.parseM3u(other))
-        assertEquals("146", p.channels[0].tvgId)                       // by its number, though the names differ
-        assertEquals("http://guide.example/img/146.png", p.channels[0].logo)
-        assertEquals("", p.channels[1].logo)                           // unknown to the second playlist
-        assertEquals("900", p.channels[2].tvgId)                       // by name
-        assertEquals("http://guide.example/epg.xml.gz", p.guideUrl)
-    }
-
-    @Test fun theNumberIsTakenFromTheAddressOnly() {
-        assertEquals("19241", Iptv.streamId("http://h.example/iptv/KEY/19241/index.m3u8"))
-        assertEquals("55", Iptv.streamId("http://h.example/live/user/pass/55.ts?token=9"))
-        assertEquals("", Iptv.streamId("http://h.example:8080/stream.m3u8"))
-        assertEquals("", Iptv.streamId("http://h.example/2024/"))      // too close to the host to be a channel
-    }
-
     @Test fun guideTimesAreRead() {
         assertEquals(0L, Iptv.xmltvTime("19700101000000 +0000"))
         assertEquals(1_000L * 1794084900L, Iptv.xmltvTime("20261107235500 +0300"))
@@ -79,6 +26,14 @@ class IptvTest {
         assertNull(Iptv.progOf("<programme start=\"x\" stop=\"y\" channel=\"1\"><title>t</title></programme>"))
     }
 
+    @Test fun aChannelOfTheGuideIsRead() {
+        val c = Iptv.chanOf("<channel id=\"8900\">\n\t<display-name lang=\"ru\">4Ever Cinema HD</display-name>\n\t<display-name lang=\"ru\">4ever Cinema HD UA</display-name>\n\t<icon src=\"http://g.example/img/8900.png\" />\n</channel>")!!
+        assertEquals("8900", c.id)
+        assertEquals(listOf("4Ever Cinema HD", "4ever Cinema HD UA"), c.names)
+        assertEquals("http://g.example/img/8900.png", c.icon)
+        assertNull(Iptv.chanOf("<channel><display-name>x</display-name></channel>"))
+    }
+
     @Test fun nowAndNext() {
         val l = listOf(Iptv.Prog(0, 100, "a"), Iptv.Prog(100, 200, "b"), Iptv.Prog(200, 300, "c"))
         assertEquals("b" to "c", Iptv.nowNext(l, 150).let { it.first?.title to it.second?.title })
@@ -89,10 +44,69 @@ class IptvTest {
         assertEquals("", Iptv.line(null, null) { "" })
     }
 
-    @Test fun theHomeShowsOneGroup() {
-        val ch = Iptv.parseM3u(own).channels
-        assertEquals(listOf("Film, the Channel"), Iptv.shown(ch, "cinema").map { it.name })
-        assertEquals(listOf("First Channel UHD"), Iptv.shown(ch, "gone").map { it.name })      // an unknown group: the first one
+    private val guide = mapOf(Iptv.nameKey("Зоопарк HD") to "50", Iptv.nameKey("Зоопарк") to "50", Iptv.nameKey("Первый канал") to "146", Iptv.nameKey("2x2") to "9")
+    private fun seen(vararg texts: String) = Iptv.onScreen(texts.toList()) { guide[it] }
+
+    @Test fun whatCanNotBeANameIsNotCompared() {
+        assertEquals("", Iptv.nameKey("6"))
+        assertEquals("", Iptv.nameKey("14:25"))
+        assertEquals("", Iptv.nameKey(" / 1920x1080".take(3)))
+        assertEquals("2x2", Iptv.nameKey("2x2"))
+        assertEquals(Iptv.nameKey("зоопарк hd"), Iptv.nameKey(" Зоопарк  HD "))
+    }
+
+    @Test fun theInfoBarNamesOneChannel() {
+        // what an IPTV app's info bar shows: number, channel, times, programmes
+        val s = seen("6", "Зоопарк HD", "14:25", "Количество имеет значение", "+44", "15:15", "Гениальные морские охотники", "50", "14:31")
+        assertEquals(listOf("50"), s.map { it.id })
+        assertEquals("Зоопарк HD", s[0].name)
+        // the same channel under two of its names is still one channel
+        assertEquals(1, seen("Зоопарк", "Зоопарк HD").size)
+        // a channel list names many
+        assertEquals(3, seen("Зоопарк HD", "Первый канал", "2x2", "Category").size)
+        assertTrue(seen("EPG", "Category", "Actions").isEmpty())
+    }
+
+    @Test fun aChannelCountsAsWatchedAfterHalfAMinute() {
+        val w = Iptv.Watch()
+        val zoo = seen("Зоопарк HD"); val one = seen("Первый канал")
+        assertNull(w.look(zoo, 0))
+        assertNull(w.look(emptyList(), 10_000))                 // the bar has gone, the channel plays on
+        assertEquals("50", w.look(emptyList(), Iptv.WATCHED_MS)?.id)
+        assertNull(w.look(emptyList(), Iptv.WATCHED_MS + 5_000)) // told once
+        assertNull(w.look(zoo, 100_000))                         // the bar shows the same channel again: nothing new
+        // zapping: each next channel starts the count afresh, only the one stayed on counts
+        assertNull(w.look(one, 200_000))
+        assertNull(w.look(zoo, 210_000))
+        assertNull(w.look(one, 220_000))
+        assertNull(w.look(emptyList(), 249_000))
+        assertEquals("146", w.look(emptyList(), 250_000)?.id)
+    }
+
+    @Test fun aChannelListSaysNothingAboutWhatPlays() {
+        val w = Iptv.Watch()
+        assertNull(w.look(seen("Зоопарк HD"), 0))
+        assertNull(w.look(seen("Зоопарк HD", "Первый канал", "2x2"), 5_000))     // the list is open
+        assertEquals("50", w.look(seen("Первый канал", "2x2"), 31_000)?.id)       // still the channel chosen before
+    }
+
+    @Test fun leavingTheAppForgetsAnUnfinishedCount() {
+        val w = Iptv.Watch()
+        assertNull(w.look(seen("Зоопарк HD"), 0))
+        w.reset()
+        assertNull(w.look(emptyList(), 60_000))
+    }
+
+    @Test fun theLastFiveAreKeptNewestFirst() {
+        var l = emptyList<Iptv.Recent>()
+        for (i in 1..7) l = Iptv.pushed(l, Iptv.Recent("$i", "Channel $i"))
+        assertEquals(listOf("7", "6", "5", "4", "3"), l.map { it.id })
+        l = Iptv.pushed(l, Iptv.Recent("4", "Channel 4 HD"))
+        assertEquals(listOf("4", "7", "6", "5", "3"), l.map { it.id })
+        assertEquals("Channel 4 HD", l[0].name)
+        val back = Iptv.decode(Iptv.encode(l))
+        assertEquals(l.map { it.id to it.name }, back.map { it.id to it.name })
+        assertTrue(Iptv.decode(listOf("broken", "\tx", "y\t")).isEmpty())
     }
 
     private val xml = "<?xml version=\"1.0\"?><!DOCTYPE tv SYSTEM \"x\">\n<tv>\n<channel id=\"8900\">\n\t<display-name lang=\"ru\">4Ever Cinema HD</display-name>\n\t<icon src=\"i\" />\n</channel>" +
@@ -111,35 +125,23 @@ class IptvTest {
             override fun read(buf: ByteArray, off: Int, len: Int): Int { if (i >= b.size) return -1; val n = minOf(7, len, b.size - i); System.arraycopy(b, i, buf, off, n); i += n; return n }
         }
         Iptv.scanGuide(slow, { Iptv.attrOf(it, "channel") == "8900" }, { chans.add(it) }, { progs.add(it) })
-        assertEquals(listOf("8900" to listOf("4Ever Cinema HD"), "146" to listOf("One")), chans.map { Iptv.channelOf(it)!! })
+        assertEquals(listOf("8900", "146"), chans.map { Iptv.chanOf(it)!!.id })
         assertEquals(listOf("A", "C"), progs.map { Iptv.progOf(it)!!.second.title })
     }
 
-    /** With IPTV_TEST_DIR set to a folder holding playlist.m3u, extra.m3u and epg.xml.gz, the real files are read. */
-    @Test fun realFilesIfGiven() {
-        val dir = System.getenv("IPTV_TEST_DIR")
-        assumeTrue(dir != null && File(dir, "playlist.m3u").exists())
-        var p = Iptv.parseM3u(File(dir, "playlist.m3u").readText())
-        if (File(dir, "extra.m3u").exists()) p = Iptv.merge(p, Iptv.parseM3u(File(dir, "extra.m3u").readText()))
-        println("channels ${p.channels.size}, logos ${p.channels.count { it.logo.isNotEmpty() }}, guide ids ${p.channels.count { it.tvgId.isNotEmpty() }}, groups ${Iptv.groups(p.channels).size}, guide ${p.guideUrl.isNotEmpty()}")
-        assertTrue(p.channels.isNotEmpty())
-        val g = File(dir, "epg.xml.gz")
-        if (!g.exists()) return
-        val ids = p.channels.map { it.tvgId }.filter { it.isNotEmpty() }.toHashSet()
-        val out = HashMap<String, ArrayList<Iptv.Prog>>()
-        val now = System.currentTimeMillis()
-        var chans = 0
+    /** With IPTV_TEST_GUIDE set to a guide file (.xml.gz), the real file is read and a name looked up. */
+    @Test fun realGuideIfGiven() {
+        val path = System.getenv("IPTV_TEST_GUIDE")
+        assumeTrue(path != null && File(path).exists())
+        val names = HashMap<String, String>()
+        var icons = 0; var progs = 0
         val t0 = System.currentTimeMillis()
-        GZIPInputStream(g.inputStream(), 1 shl 16).use { s ->
-            Iptv.scanGuide(s, { Iptv.attrOf(it, "channel") in ids }, { chans++ }, { b ->
-                Iptv.progOf(b)?.let { (id, pr) -> if (pr.stop > now && pr.start < now + 86_400_000L) out.getOrPut(id) { ArrayList() }.add(pr) }
-            })
+        GZIPInputStream(File(path).inputStream(), 1 shl 16).use { s ->
+            Iptv.scanGuide(s, { true }, { b -> Iptv.chanOf(b)?.let { c -> if (c.icon.isNotEmpty()) icons++; for (n in c.names) Iptv.nameKey(n).let { if (it.isNotEmpty()) names.putIfAbsent(it, c.id) } } },
+                { b -> if (Iptv.progOf(b) != null) progs++ })
         }
-        println("guide: $chans channel blocks, ${out.size} channels with programmes, ${out.values.sumOf { it.size }} programmes in 24h, ${System.currentTimeMillis() - t0} ms")
-        for (c in Iptv.shown(p.channels, "").take(4)) {
-            val (cur, next) = Iptv.nowNext(out[c.tvgId]?.sortedBy { it.start }, now)
-            println("  ${c.name}: " + Iptv.line(cur, next) { java.text.SimpleDateFormat("HH:mm").format(java.util.Date(it)) })
-        }
-        assertTrue(chans > 0)
+        println("guide: ${names.size} names, $icons logos, $progs programmes, ${System.currentTimeMillis() - t0} ms")
+        System.getenv("IPTV_TEST_NAME")?.let { println("  '$it' -> channel ${names[Iptv.nameKey(it)]}") }
+        assertTrue(names.isNotEmpty())
     }
 }

@@ -97,25 +97,24 @@ class Store(ctx: Context) {
         get() = p.getString("tmdbKey", "") ?: ""
         set(v) { p.edit().putString("tmdbKey", v.trim()).apply() }
 
-    /** TV channels from the user's own playlist: off unless a playlist is given */
+    /** recently watched TV channels: off unless the user gives a programme guide */
     var iptv: Boolean
         get() = p.getBoolean("iptv", false)
         set(v) { p.edit().putBoolean("iptv", v).apply() }
-    /** the playlist link (it contains the subscription key: kept out of the settings backup) */
-    var iptvUrl: String
-        get() = p.getString("iptvUrl", "") ?: ""
-        set(v) { p.edit().putString("iptvUrl", v.trim()).apply() }
-    /** optional: a second playlist that carries logos and the guide for the first */
-    var iptvExtra: String
-        get() = p.getString("iptvExtra", "") ?: ""
-        set(v) { p.edit().putString("iptvExtra", v.trim()).apply() }
-    var iptvGroup: String
-        get() = p.getString("iptvGroup", "") ?: ""
-        set(v) { p.edit().putString("iptvGroup", v).apply() }
-    /** the package of the app a channel opens */
+    /** the link of the programme guide (XMLTV) */
+    var iptvGuide: String
+        get() = p.getString("iptvGuide", "") ?: ""
+        set(v) { p.edit().putString("iptvGuide", v.trim()).apply() }
+    /** the package of the IPTV app: its screen is watched for channel names, and channels open it */
     var iptvApp: String
         get() = p.getString("iptvApp", "") ?: ""
         set(v) { p.edit().putString("iptvApp", v).apply() }
+    /** the channels watched last, newest first (see Iptv.encode); kept out of the settings backup */
+    var iptvRecent: List<String>
+        get() = list("iptvRecent")
+        set(v) { putList("iptvRecent", v) }
+    /** an earlier version kept a playlist link (with the subscription key in it): it is not needed any more */
+    fun dropPlaylist() { p.edit().remove("iptvUrl").remove("iptvExtra").remove("iptvGroup").apply() }
 
     var pauseOnSwitch: Boolean
         get() = p.getBoolean("pauseOnSwitch", true)
@@ -137,7 +136,7 @@ class Store(ctx: Context) {
         set(v) { p.edit().putInt("saverMode", v).apply() }
 
     // ---- backup / restore of the settings (not the weather cache)
-    private val skip = setOf("lat", "lon", "geoFor", "place", "wTemp", "wHi", "wLo", "wCode", "wDay", "wTime", "recents", "askedTv", "adblock", "tmdbKey", "iptvUrl")
+    private val skip = setOf("lat", "lon", "geoFor", "place", "wTemp", "wHi", "wLo", "wCode", "wDay", "wTime", "recents", "askedTv", "adblock", "tmdbKey", "iptvRecent")
     private var backupListener: android.content.SharedPreferences.OnSharedPreferenceChangeListener? = null
 
     fun exportJson(): String {
