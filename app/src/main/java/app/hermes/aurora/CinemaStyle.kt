@@ -373,6 +373,7 @@ internal class CinemaStyle(a: MainActivity) : HomeStyle(a) {
         openBtn.visibility = View.VISIBLE
 
         val url = item.art
+        if (BuildConfig.DEBUG) android.util.Log.d("AuroraArt", "show ${item.pkg}: $url")
         // a title's picture fills the screen: decode it at the screen's full width, never smaller
         Images.load(a, url, if (item.square) 640 else a.resources.displayMetrics.widthPixels.coerceAtLeast(1280)) { bmp ->
             if (shown !== item || bmp == null) return@load

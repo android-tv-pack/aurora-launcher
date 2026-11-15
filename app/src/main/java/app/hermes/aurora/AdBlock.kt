@@ -14,7 +14,6 @@ import java.net.Inet4Address
 import java.net.InetAddress
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
-import java.util.zip.GZIPInputStream
 
 /**
  * The ad blocker. Ads and trackers are loaded from their own servers; when a box can't look up those servers'
@@ -26,7 +25,7 @@ import java.util.zip.GZIPInputStream
  * reason, Android drops the VPN and the box simply uses its normal DNS again: it can't leave the box offline.
  *
  * Blocklist: StevenBlack/hosts (MIT licence), unified list, about 77,000 ad and tracker domains, in
- * assets/adblock_hosts.gz. A name is blocked when it or any domain above it is on the list.
+ * assets/adblock_hosts.txt (one domain per line). A name is blocked when it or any domain above it is on the list.
  * Limits: ads served from the same servers as the content (YouTube's) can't be told apart by name; apps that
  * use their own encrypted DNS bypass the box's DNS.
  */
@@ -63,11 +62,13 @@ internal object AdBlock {
 
     /** the answer of Android's permission prompt */
     fun onPermission(a: Activity, store: Store, ok: Boolean) {
+        android.util.Log.i("AuroraAdBlock", "permission answer ok=$ok setting=${store.adblock}")
         if (ok && store.adblock == 1) start(a) else store.adblock = 0
     }
 
     fun start(ctx: Context) {
-        try { ctx.startService(Intent(ctx, AdBlockService::class.java)) } catch (_: Exception) {}
+        android.util.Log.i("AuroraAdBlock", "start requested")
+        try { ctx.startService(Intent(ctx, AdBlockService::class.java)) } catch (e: Exception) { android.util.Log.w("AuroraAdBlock", "start failed: $e") }
     }
 
     fun stop(ctx: Context) {
@@ -81,7 +82,7 @@ internal object AdBlock {
     fun load(ctx: Context): HashSet<String> {
         list?.let { return it }
         val set = HashSet<String>(90_000)
-        GZIPInputStream(ctx.assets.open("adblock_hosts.gz")).bufferedReader().useLines { lines ->
+        ctx.assets.open("adblock_hosts.txt").bufferedReader().useLines { lines ->
             for (l in lines) { val d = l.trim(); if (d.isNotEmpty() && !d.startsWith("#")) set.add(d) }
         }
         list = set
@@ -171,6 +172,7 @@ class AdBlockService : VpnService() {
     private val pool = Executors.newFixedThreadPool(6)
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        android.util.Log.i("AuroraAdBlock", "service command ${intent?.action}")
         if (intent?.action == STOP) { shutdown(); stopSelf(); return START_NOT_STICKY }
         if (thread == null) {
             val t = Thread({ run() }, "aurora-adblock")
@@ -219,7 +221,8 @@ class AdBlockService : VpnService() {
                 .addRoute(DNS, 32)
                 .addDisallowedApplication(packageName)       // Aurora's own lookups (and the forwarding below) go direct
                 .setBlocking(true)
-                .establish() ?: return
+                .establish()
+            if (pfd == null) { android.util.Log.w("AuroraAdBlock", "establish() gave nothing (not allowed?)"); return }
             mine = pfd
             tun = pfd
             AdBlock.blocked.set(0)
@@ -248,7 +251,7 @@ class AdBlockService : VpnService() {
                 pool.execute { forward(pkt, ihl, dOff, n, servers, output) }
             }
         } catch (e: Exception) {
-            if (AdBlock.running) android.util.Log.w("AuroraAdBlock", "stopped: $e")
+            android.util.Log.w("AuroraAdBlock", "stopped: $e")
         } finally {
             // the filter is gone: drop the VPN, so the box goes back to its normal DNS at once
             // (unless a newer start has already replaced it)
