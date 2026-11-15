@@ -751,7 +751,7 @@ class MainActivity : Activity() {
         val nightNames = arrayOf("Off", "Auto (23:00 to 07:00)", "Custom hours")
         fun hour(h: Int) = String.format(Locale.US, "%02d:00", h)
         val saverNames = arrayOf("Off", "2 min", "5 min", "10 min", "20 min")
-        val saverScenes = intArrayOf(12, 11, 9, 10, 8, 7, -1)             // Interstellar, Blade Runner, Tron, Matrix, Cyberpunk, Desert, Rotate
+        val saverScenes = intArrayOf(6, 5, 4, -1)             // Blade Runner, Cyberpunk, Desert, Rotate
         val rotNames = arrayOf("Off", "Every track", "Every 5 min", "Every 15 min")
         val rows = listOf(
             Row("Home style", { HomeLogic.STYLE_NAMES[store.style - 1] }) {

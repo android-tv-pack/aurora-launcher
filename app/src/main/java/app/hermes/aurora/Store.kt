@@ -37,12 +37,19 @@ class Store(ctx: Context) {
         get() = p.getInt("iconStyle", 0).coerceIn(0, IconStyles.NAMES.size - 1)
         set(v) { p.edit().putInt("iconStyle", v).apply() }
 
-    /** music visualiser: 0 Off, 1 Flow, 2 Orb, 3 Stardust, 4 Silk, 5 Pixels, 6 Wave, 7 Desert, 8 Cyberpunk, 9 Tron Legacy, 10 Matrix, 11 Blade Runner, 12 Interstellar (see VisualizerView.MODES) */
+    /** music visualiser: 0 Off, 1 Flow, 2 Pixels, 3 Wave, 4 Desert, 5 Cyberpunk, 6 Blade Runner (see VisualizerView.MODES) */
     var visualizer: Int
-        get() = p.getInt("visualizer", 0).coerceIn(0, 12)
+        get() = p.getInt("visualizer", 0).coerceIn(0, 6)
         set(v) { p.edit().putInt("visualizer", v).apply() }
 
     init {
+        // settings written when there were twelve visualizers: the six that remain keep their choice
+        if (p.getInt("vizV", 0) < 2) {
+            val ed = p.edit().putInt("vizV", 2)
+            if (p.contains("visualizer")) ed.putInt("visualizer", HomeLogic.migrateVisualizer(p.getInt("visualizer", 0)))
+            if (p.contains("saverMode")) ed.putInt("saverMode", HomeLogic.migrateVisualizer(p.getInt("saverMode", 12)))
+            ed.apply()
+        }
         // settings written by a version with the three old styles: Cinema -> Marquee, Horizon and Command -> Drift
         if (p.getInt("styleV", 0) < 2) {
             val ed = p.edit().putInt("styleV", 2)
@@ -92,7 +99,7 @@ class Store(ctx: Context) {
 
     /** screensaver scene: -1 = rotate through the scenes, else a visualiser mode 7..12 */
     var saverMode: Int
-        get() = p.getInt("saverMode", 12).let { if (it == -1) -1 else it.coerceIn(7, 12) }
+        get() = p.getInt("saverMode", 6).let { if (it == -1) -1 else it.coerceIn(4, 6) }
         set(v) { p.edit().putInt("saverMode", v).apply() }
 
     // ---- backup / restore of the settings (not the weather cache)
@@ -137,6 +144,12 @@ class Store(ctx: Context) {
             n++
         }
         // a backup made before the two new styles holds one of the old style numbers
+        // ... and a backup made when there were twelve visualizers holds the old numbers
+        if (!o.has("vizV")) {
+            ed.putInt("vizV", 2)
+            o.optJSONArray("visualizer")?.let { ed.putInt("visualizer", HomeLogic.migrateVisualizer(it.optInt(1, 0))) }
+            o.optJSONArray("saverMode")?.let { ed.putInt("saverMode", HomeLogic.migrateVisualizer(it.optInt(1, 12))) }
+        }
         if (!o.has("styleV")) {
             ed.putInt("styleV", 2)
             o.optJSONArray("style")?.let { ed.putInt("style", HomeLogic.migrateStyle(it.optInt(1, 1))) }

@@ -200,4 +200,17 @@ class HomeLogicTest {
         val emoji = "ab\uD83D\uDE00cd"
         assertEquals("ab…", HomeLogic.cutAtWord(emoji, 3))
     }
+
+    @Test fun visualizersThatRemainKeepTheirChoice() {
+        // old numbers: 1 Flow, 5 Pixels, 6 Wave, 7 Desert, 8 Cyberpunk, 11 Blade Runner
+        assertEquals(listOf(0, 1, 2, 3, 4, 5, 6), listOf(0, 1, 5, 6, 7, 8, 11).map { HomeLogic.migrateVisualizer(it) })
+    }
+
+    @Test fun removedVisualizersFallBack() {
+        // Orb, Stardust, Silk -> Flow; Tron Legacy, Matrix, Interstellar -> Blade Runner; rotate stays; rubbish -> Off
+        assertEquals(listOf(1, 1, 1), listOf(2, 3, 4).map { HomeLogic.migrateVisualizer(it) })
+        assertEquals(listOf(6, 6, 6), listOf(9, 10, 12).map { HomeLogic.migrateVisualizer(it) })
+        assertEquals(-1, HomeLogic.migrateVisualizer(-1))
+        assertEquals(0, HomeLogic.migrateVisualizer(99))
+    }
 }

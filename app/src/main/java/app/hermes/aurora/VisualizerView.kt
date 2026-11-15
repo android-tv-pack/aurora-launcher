@@ -37,15 +37,17 @@ import kotlin.math.sqrt
 internal class VisualizerView(private val a: MainActivity) : View(a) {
 
     companion object {
-        val MODES = arrayOf("Off", "Flow", "Orb", "Stardust", "Silk", "Pixels", "Wave", "Desert", "Cyberpunk", "Tron Legacy", "Matrix", "Blade Runner", "Interstellar")
+        val MODES = arrayOf("Off", "Flow", "Pixels", "Wave", "Desert", "Cyberpunk", "Blade Runner")
+        /** the first scene; the modes before it need music */
+        const val FIRST_SCENE = 4
         /** the scenes also run by themselves when nothing is playing */
-        fun isScene(mode: Int) = mode >= 7
+        fun isScene(mode: Int) = mode >= FIRST_SCENE
         fun allowed(a: MainActivity) = a.checkSelfPermission("android.permission.RECORD_AUDIO") == android.content.pm.PackageManager.PERMISSION_GRANTED
         private const val N = 56
         private const val TAU = (2 * PI).toFloat()
     }
 
-    /** screensaver: -1 = off, -2 = rotate through the scenes, 7..12 = that scene, drawn full-screen */
+    /** screensaver: -1 = off, -2 = rotate through the scenes, 4..6 = that scene, drawn full-screen */
     var ambient = -1
         set(v) { field = v; rotMode = -1; evaluate() }
     private var rotMode = -1
@@ -74,7 +76,7 @@ internal class VisualizerView(private val a: MainActivity) : View(a) {
         else if (key.isNotEmpty() && rotKey.isNotEmpty() && key != rotKey) go = true
         if (key.isNotEmpty()) rotKey = key
         if (!go) return
-        val list = if (scenes) intArrayOf(7, 8, 9, 10, 11, 12) else IntArray(12) { it + 1 }
+        val list = if (scenes) IntArray(MODES.size - FIRST_SCENE) { it + FIRST_SCENE } else IntArray(MODES.size - 1) { it + 1 }
         var m: Int
         do { m = list[rnd.nextInt(list.size)] } while (m == rotMode && list.size > 1)
         rotMode = m; rotSince = now; xfade = 1f
@@ -144,15 +146,6 @@ internal class VisualizerView(private val a: MainActivity) : View(a) {
         c.drawRect(0f, 0f, 64f, 256f, hz)
     }
 
-    // ---- Stardust particles (polar, flying out of the centre)
-    private val pn = 190
-    private val pAng = FloatArray(pn)
-    private val pDist = FloatArray(pn)
-    private val pSpd = FloatArray(pn)
-    private val pSize = FloatArray(pn)
-    private val pCol = IntArray(pn)
-    private val pSwirl = FloatArray(pn)
-    private val pAlive = BooleanArray(pn)
     private val rnd = java.util.Random(7)
 
     // ---- Pixels
@@ -195,7 +188,7 @@ internal class VisualizerView(private val a: MainActivity) : View(a) {
         val live = mode > 0 && allowed(a) && NowPlaying.anyPlaying()
         if (live) { if (viz == null) capture() } else release()
         refreshPalette()
-        // scenes (desert, ocean, starship) keep moving without music; the others need a signal
+        // the scenes keep moving without music; the others need a signal
         setActive(mode > 0 && (viz != null || isScene(mode)))
     }
 
@@ -205,7 +198,7 @@ internal class VisualizerView(private val a: MainActivity) : View(a) {
         visibility = if (on) VISIBLE else GONE
         h.removeCallbacks(frame)
         if (on) { lastFrame = SystemClock.uptimeMillis(); h.post(frame) }
-        else { target.fill(0f); bands.fill(0f); bass = 0f; mid = 0f; treble = 0f; beat = 0f; pAlive.fill(false) }
+        else { target.fill(0f); bands.fill(0f); bass = 0f; mid = 0f; treble = 0f; beat = 0f }
         a.onVisualizerChanged()
     }
 
@@ -371,18 +364,12 @@ internal class VisualizerView(private val a: MainActivity) : View(a) {
         val hit = beatHit
         beatHit = false
         when (mode()) {
-            6 -> waves(c, w, hh)
-            7 -> desert(c, w, hh, hit)
-            8 -> cyber(c, w, hh, hit)
-            9 -> tron(c, w, hh, hit)
-            10 -> matrix(c, w, hh, hit)
-            11 -> runner(c, w, hh, hit)
-            12 -> interstellar(c, w, hh, hit)
             1 -> flow(c, w, hh)
-            2 -> orb(c, w, hh)
-            3 -> stardust(c, w, hh)
-            4 -> silk(c, w, hh)
-            5 -> pixels(c, w, hh)
+            2 -> pixels(c, w, hh)
+            3 -> waves(c, w, hh)
+            4 -> desert(c, w, hh, hit)
+            5 -> cyber(c, w, hh, hit)
+            6 -> runner(c, w, hh, hit)
         }
         if (xfade > 0f) {          // a new scene fades in from black
             c.drawColor(Color.argb((xfade * 255).toInt().coerceIn(0, 255), 0, 0, 0))
@@ -417,136 +404,6 @@ internal class VisualizerView(private val a: MainActivity) : View(a) {
         }
         // a soft horizon glow that breathes with the kick
         glowAt(c, w * 0.5f, hh * 1.02f, w * (0.6f + 0.1f * beat), 2, (90 + 110 * bass + 55 * beat).toInt())
-    }
-
-    /** ORB: a living blob in the middle, pulsing on the beat, with sparks orbiting it */
-    private fun orb(c: Canvas, w: Float, hh: Float) {
-        val cx = w * 0.5f
-        val cy = hh * 0.47f
-        val r0 = min(w, hh) * 0.2f * (1f + 0.16f * beat + 0.1f * bass)
-        glowAt(c, cx, cy, r0 * 4.6f, 0, (120 + 120 * bass + 60 * beat).toInt())
-        glowAt(c, cx, cy, r0 * 3.0f, 1, (80 + 110 * mid).toInt())
-
-        val n = 72
-        for (layer in 0..2) {
-            val k = 1f - layer * 0.2f
-            val tl = t * (1.1f - layer * 0.3f) + layer * 1.7f
-            path.reset()
-            var fx = 0f; var fy = 0f
-            var px = 0f; var py = 0f
-            for (i in 0..n) {
-                val u = (i % n) / n.toFloat()
-                val ang = u * TAU + tl * 0.25f
-                // symmetric spectrum around the circle: the left and right halves mirror each other
-                val sv = spec(abs(u * 2f - 1f))
-                val rr = r0 * k * (1f + 0.62f * sv * (0.6f + 0.12f * layer) + 0.05f * sin(3f * ang + tl * 1.4f) + 0.035f * sin(5f * ang - tl))
-                val x = cx + cos(ang) * rr
-                val y = cy + sin(ang) * rr
-                if (i == 0) { path.moveTo(x, y); fx = x; fy = y } else path.quadTo(px, py, (px + x) / 2f, (py + y) / 2f)
-                px = x; py = y
-            }
-            path.quadTo(px, py, (px + fx) / 2f, (py + fy) / 2f)
-            path.close()
-            line.style = Paint.Style.FILL
-            line.xfermode = screen
-            line.color = withA(cur[layer], 52 + (beat * 38).toInt() - layer * 8)
-            c.drawPath(path, line)
-            line.style = Paint.Style.STROKE
-            line.strokeWidth = max(3f, hh * (0.008f - layer * 0.0016f))
-            line.color = withA(if (layer == 0) cur[2] else cur[layer], 210)
-            c.drawPath(path, line)
-        }
-        line.xfermode = null
-        // sparks circling the orb, faster and brighter with the highs
-        for (i in 0 until 26) {
-            val ph = i * 2.399f
-            val ang = ph + t * (0.35f + 0.9f * treble) * (if (i % 2 == 0) 1f else -0.7f)
-            val rr = r0 * (1.55f + 0.45f * sin(t * 0.8f + ph * 3f) + 0.25f * bands[(i * 2) % N])
-            glowAt(c, cx + cos(ang) * rr, cy + sin(ang) * rr * 0.92f, hh * (0.012f + 0.016f * bands[(i * 2) % N]), i % 3, (120 + 130 * treble).toInt())
-        }
-    }
-
-    /** STARDUST: a warp-speed starfield flying out of the centre; the kick throws bursts of stars */
-    private fun stardust(c: Canvas, w: Float, hh: Float) {
-        val cx = w * 0.5f
-        val cy = hh * 0.5f
-        val maxD = sqrt(cx * cx + cy * cy) * 1.05f
-        glowAt(c, cx, cy, hh * (0.45f + 0.3f * beat + 0.2f * bass), 0, (55 + 100 * bass + 80 * beat).toInt())
-        glowAt(c, cx, cy, hh * 0.22f, 2, (30 + 60 * bass).toInt())
-
-        var spawn = (1.5f + 7f * (bass + mid) * 0.5f + (if (beat > 0.95f) 22f else 0f)).toInt()
-        val dt = 0.036f
-        line.style = Paint.Style.STROKE
-        line.strokeCap = Paint.Cap.ROUND
-        line.xfermode = screen
-        for (i in 0 until pn) {
-            if (!pAlive[i]) {
-                if (spawn > 0) {
-                    spawn--
-                    pAlive[i] = true
-                    pAng[i] = rnd.nextFloat() * TAU
-                    pDist[i] = hh * (0.02f + 0.06f * rnd.nextFloat())
-                    pSpd[i] = hh * (0.18f + 0.5f * rnd.nextFloat())
-                    pSize[i] = 0.5f + rnd.nextFloat()
-                    pCol[i] = rnd.nextInt(3)
-                    pSwirl[i] = (rnd.nextFloat() - 0.5f) * 0.5f
-                }
-                continue
-            }
-            val f = (pDist[i] / maxD).coerceIn(0f, 1.2f)
-            val speed = pSpd[i] * (0.25f + 2.4f * f * f + 0.9f * bass + 1.3f * beat)
-            pDist[i] += speed * dt
-            pAng[i] += pSwirl[i] * dt * (0.4f + treble)
-            if (pDist[i] > maxD) { pAlive[i] = false; continue }
-            val ca = cos(pAng[i]); val sa = sin(pAng[i])
-            val x = cx + ca * pDist[i]
-            val y = cy + sa * pDist[i]
-            val len = speed * dt * (2f + 5f * f)
-            val al = (30f + 225f * f.coerceAtMost(1f) * min(1f, f * 4f)).toInt()
-            line.strokeWidth = max(1.5f, hh * 0.0035f * pSize[i] * (0.5f + f * 2.2f))
-            line.color = withA(cur[pCol[i]], al)
-            c.drawLine(x - ca * len, y - sa * len, x, y, line)
-            if (f > 0.25f) glowAt(c, x, y, hh * 0.012f * pSize[i] * (0.6f + f * 2f), pCol[i], (al * 0.7f).toInt())
-        }
-        line.xfermode = null
-        line.strokeCap = Paint.Cap.BUTT
-    }
-
-    /** SILK: layered ribbons of light flowing across the screen, like a voice assistant waveform */
-    private fun silk(c: Canvas, w: Float, hh: Float) {
-        val cy = hh * 0.5f
-        line.style = Paint.Style.STROKE
-        line.strokeCap = Paint.Cap.ROUND
-        line.xfermode = screen
-        val pts = 64
-        for (layer in 0..4) {
-            val level = when (layer % 3) { 0 -> bass; 1 -> mid; else -> treble }
-            val amp = hh * (0.035f + 0.3f * level + 0.05f * beat) * (1f - layer * 0.1f)
-            val freq = 1.1f + layer * 0.55f
-            val speed = (0.7f + layer * 0.4f) * (if (layer % 2 == 0) 1f else -1f)
-            val col = cur[layer % 3]
-            path.reset()
-            for (i in 0..pts) {
-                val u = i / pts.toFloat()
-                val env = (1f - (2f * u - 1f) * (2f * u - 1f)).pow(2f)
-                val y = cy + amp * env * sin(u * TAU * freq + t * speed) * (0.8f + 0.2f * sin(u * 9f - t * 1.3f + layer))
-                val x = u * w
-                if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
-            }
-            val thin = layer >= 3
-            // a wide soft halo, a medium body and a bright core give the glow without a blur filter
-            line.strokeWidth = hh * (if (thin) 0.016f else 0.05f)
-            line.color = withA(col, if (thin) 26 else 36)
-            c.drawPath(path, line)
-            line.strokeWidth = hh * (if (thin) 0.006f else 0.018f)
-            line.color = withA(col, if (thin) 90 else 120)
-            c.drawPath(path, line)
-            line.strokeWidth = max(2f, hh * (if (thin) 0.0025f else 0.005f))
-            line.color = withA(if (thin) col else cur[2], 255)
-            c.drawPath(path, line)
-        }
-        line.xfermode = null
-        line.strokeCap = Paint.Cap.BUTT
     }
 
     /** PIXELS: a glowing LED dot-matrix equaliser with falling peak dots */
@@ -584,7 +441,7 @@ internal class VisualizerView(private val a: MainActivity) : View(a) {
         line.xfermode = null
     }
 
-    // ------------------------------------------------------------------ Wave (the classic) and the three scenes
+    // ------------------------------------------------------------------ Wave (the classic) and the scenes
 
     private var wave = ByteArray(0)
     private var idle = true
@@ -1036,196 +893,6 @@ internal class VisualizerView(private val a: MainActivity) : View(a) {
         line.xfermode = null
     }
 
-    // ================================================================ TRON LEGACY
-    private val trN = 9
-    private val trLane = IntArray(trN)
-    private val trF = FloatArray(trN) { -1f }
-    private val trV = FloatArray(trN)
-    private val trOr = BooleanArray(trN)
-    private var trAng = 0f
-    private val trC = Color.rgb(40, 220, 255)
-    private val trO = Color.rgb(255, 120, 20)
-
-    @Volatile private var trBg: Bitmap? = null
-    @Volatile private var trEm: Bitmap? = null
-    @Volatile private var trLoading = false
-    private var trScrim: Shader? = null
-    private var trScrimW = 0f
-
-    private fun loadTr() {
-        if (trBg != null || trLoading) return
-        trLoading = true
-        val ctx = context.applicationContext
-        Thread {
-            try {
-                val o = android.graphics.BitmapFactory.Options().apply { inScaled = false }
-                fun bmp(n: String): Bitmap = ctx.assets.open(n).use { android.graphics.BitmapFactory.decodeStream(it, null, o)!! }
-                trEm = bmp("tr_emit.webp"); trBg = bmp("tr_bg.webp")
-            } catch (e: Exception) { android.util.Log.d("Tron", "asset load failed: $e") }
-            trLoading = false
-        }.start()
-    }
-
-    private fun tron(c: Canvas, w: Float, hh: Float, hit: Boolean) {
-        loadTr()
-        val y0 = hh * 0.52f
-        val vx = w * 0.5f
-        val bgB = trBg
-        if (bgB == null) { c.drawColor(Color.rgb(0, 6, 14)); return }
-        rect.set(0f, 0f, w, hh)
-        c.drawBitmap(bgB, null, rect, brPlain)
-        // the towers' glowing edges pulse with the music
-        trEm?.let {
-            brAdd.alpha = (52 + 70 * bass + 60 * beat).toInt().coerceIn(0, 255)
-            c.drawBitmap(it, null, rect, brAdd)
-        }
-        line.style = Paint.Style.FILL; line.xfermode = null; line.color = Color.argb(70, 0, 4, 12)
-        c.drawRect(0f, 0f, w, hh, line)
-        spr(c, vx, y0, w * 0.5f, cyP[1], (18 + 40 * bass + 50 * beat).toInt())
-
-        // a dark veil on the left keeps the title and buttons readable
-        if (trScrimW != w) {
-            trScrimW = w
-            trScrim = LinearGradient(0f, 0f, w * 0.45f, 0f, intArrayOf(Color.argb(170, 0, 4, 10), Color.argb(80, 0, 4, 10), Color.argb(0, 0, 4, 10)), floatArrayOf(0f, 0.55f, 1f), Shader.TileMode.CLAMP)
-        }
-        fillP.shader = trScrim
-        c.drawRect(0f, 0f, w * 0.45f, y0, fillP)
-        fillP.shader = null
-
-        // light pillars rising from the horizon: the equaliser (short, in front of the towers)
-        val np = 44
-        for (i in 0 until np) {
-            val u = (i + 0.5f) / np
-            val damp = if (u < 0.4f) 0.4f else 1f
-            val hgt = hh * (0.03f + 0.2f * spec(u * 0.9f) * damp + 0.03f * beat)
-            glowLine(c, u * w, y0, u * w, y0 - hgt, if (i % 9 == 4) trO else trC, max(1.5f, hh * 0.0025f), 190)
-        }
-
-        // the identity disc
-        val cx = vx
-        val cy = y0 - hh * 0.22f
-        val r = hh * 0.15f * (1f + 0.05f * bass + 0.07f * beat)
-        spr(c, cx, cy, r * 2.6f, cyP[1], (40 + 60 * bass + 80 * beat).toInt())
-        trAng += dtF * (25f + 90f * mid)
-        line.style = Paint.Style.STROKE
-        line.xfermode = screen
-        line.strokeWidth = max(2f, hh * 0.004f)
-        rect.set(cx - r, cy - r, cx + r, cy + r)
-        line.color = withA(trC, 255); c.drawOval(rect, line)
-        rect.set(cx - r * 0.84f, cy - r * 0.84f, cx + r * 0.84f, cy + r * 0.84f)
-        line.color = withA(trC, 215); c.drawOval(rect, line)
-        rect.set(cx - r * 0.64f, cy - r * 0.64f, cx + r * 0.64f, cy + r * 0.64f)
-        line.color = withA(trC, 180); c.drawOval(rect, line)
-        line.strokeWidth = max(4f, hh * 0.009f)
-        rect.set(cx - r * 1.14f, cy - r * 1.14f, cx + r * 1.14f, cy + r * 1.14f)
-        line.color = withA(trO, 255)
-        for (s in 0 until 10) c.drawArc(rect, trAng + s * 36f, 24f, false, line)
-        rect.set(cx - r * 0.5f, cy - r * 0.5f, cx + r * 0.5f, cy + r * 0.5f)
-        line.color = withA(trC, 230)
-        for (s in 0 until 6) c.drawArc(rect, -trAng * 1.6f + s * 60f, 38f, false, line)
-        line.xfermode = null
-        spr(c, cx, cy, r * 0.22f, cyP[1], 230)
-
-        // the grid floor
-        for (k in -14..14) {
-            val bx = vx + k * w * 0.11f
-            glowLine(c, vx + (bx - vx) * 0.02f, y0, bx, hh, trC, max(1.2f, hh * 0.0016f), 70 + (60 * beat).toInt())
-        }
-        trAng.let { }
-        gridScroll += dtF * (0.3f + 1.2f * bass + 1f * beat)
-        for (i in 0..9) {
-            val f = ((i + gridScroll) % 10f) / 10f
-            val y = y0 + (hh - y0) * f * f
-            glowLine(c, 0f, y, w, y, trC, max(1.2f, hh * 0.0016f), (20 + 100 * f).toInt())
-        }
-
-        // light cycles: a ribbon of light runs down a lane of the grid on every beat
-        if (hit) {
-            for (i in 0 until trN) if (trF[i] < 0f) {
-                trF[i] = 0.03f; trLane[i] = rnd.nextInt(13) - 6; trV[i] = 0.3f + 0.35f * rnd.nextFloat(); trOr[i] = rnd.nextFloat() < 0.3f
-                break
-            }
-        }
-        for (i in 0 until trN) {
-            if (trF[i] < 0f) continue
-            trF[i] += trV[i] * (0.6f + 1.8f * bass) * dtF
-            if (trF[i] > 1.12f) { trF[i] = -1f; continue }
-            val f = trF[i]
-            val f0 = max(0.02f, f - 0.3f)
-            val x1 = vx + trLane[i] * w * 0.11f * f * f
-            val y1 = y0 + (hh - y0) * f * f
-            val x0 = vx + trLane[i] * w * 0.11f * f0 * f0
-            val yy0 = y0 + (hh - y0) * f0 * f0
-            val col = if (trOr[i]) trO else trC
-            glowLine(c, x0, yy0, x1, y1, col, max(2f, hh * (0.003f + 0.008f * f)), 230)
-            spr(c, x1, y1, hh * (0.012f + 0.03f * f), if (trOr[i]) fireP[0] else cyP[1], 240)
-        }
-    }
-
-    // ================================================================ THE MATRIX
-    private val mxCols = 50
-    private val mxHead = FloatArray(mxCols)
-    private val mxSpd = FloatArray(mxCols)
-    private val mxLen = IntArray(mxCols)
-    private val mxCh = Array(mxCols) { CharArray(48) }
-    private val glyphs = "ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝ0123456789Z:=*+<>"
-    private val mxPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = android.graphics.Typeface.MONOSPACE; textAlign = Paint.Align.CENTER }
-
-    init {
-        for (i in 0 until mxCols) {
-            mxHead[i] = -rnd.nextFloat() * 30f
-            mxSpd[i] = 7f + 15f * rnd.nextFloat()
-            mxLen[i] = 8 + rnd.nextInt(20)
-            for (k in 0 until 48) mxCh[i][k] = glyphs[rnd.nextInt(glyphs.length)]
-        }
-    }
-
-    private fun matrix(c: Canvas, w: Float, hh: Float, hit: Boolean) {
-        c.drawColor(Color.rgb(1, 9, 4))
-        val cell = hh * 0.034f
-        val rows = (hh / cell).toInt() + 2
-        val colW = w / mxCols
-        mxPaint.textSize = cell * 0.95f
-        for (i in 0 until mxCols) {
-            val u = i / (mxCols - 1f)
-            val lvl = spec(u * 0.85f)
-            mxHead[i] += mxSpd[i] * dtF * (0.6f + 1.6f * bass + 0.8f * lvl) + (if (hit) 0.7f else 0f)
-            if (mxHead[i] - mxLen[i] > rows) {
-                mxHead[i] = -rnd.nextFloat() * 8f
-                mxSpd[i] = 7f + 15f * rnd.nextFloat()
-                mxLen[i] = 8 + rnd.nextInt(20)
-            }
-            if (rnd.nextFloat() < 0.3f) mxCh[i][rnd.nextInt(48)] = glyphs[rnd.nextInt(glyphs.length)]
-            val x = (i + 0.5f) * colW
-            val head = mxHead[i].toInt()
-            val gain = (0.3f + 0.7f * min(1f, lvl * 1.3f + 0.25f)) * (if (u < 0.4f) 0.45f else 1f)
-            for (k in 0 until mxLen[i]) {
-                val row = head - k
-                if (row < 0 || row >= rows) continue
-                val f = 1f - k / mxLen[i].toFloat()
-                val col: Int
-                val al: Int
-                when (k) {
-                    0 -> { col = Color.rgb(215, 255, 225); al = 235 }
-                    1 -> { col = Color.rgb(110, 255, 140); al = 220 }
-                    else -> { col = Color.rgb(0, (150 + 90 * f).toInt(), (40 + 30 * f).toInt()); al = (210 * f * f * gain + 18).toInt() }
-                }
-                val low = if ((row + 1) * cell > hh * 0.6f) 0.5f else 1f
-                mxPaint.color = withA(col, (al * low * (if (k == 0 && u < 0.4f) 0.55f else 1f)).toInt())
-                c.drawText(mxCh[i], (row * 7 + i * 3) % 48, 1, x, (row + 1) * cell, mxPaint)
-            }
-        }
-        // on the kick a pale code-line flashes across
-        if (beat > 0.4f) {
-            line.style = Paint.Style.FILL
-            line.xfermode = screen
-            line.color = withA(Color.rgb(90, 255, 140), (beat * 46).toInt())
-            val gy = rnd.nextFloat() * hh
-            c.drawRect(0f, gy, w, gy + hh * 0.012f, line)
-            line.xfermode = null
-        }
-    }
-
     // ================================================================ BLADE RUNNER
     // The city (smog sky, hazed tower layers, pyramid, wet street, window lights, neon signs, fog) is rendered offline by
     // tools/bladerunner.py and shipped as assets; the music drives window glow, sign flicker, fog, flames, searchlights and rain.
@@ -1405,179 +1072,6 @@ internal class VisualizerView(private val a: MainActivity) : View(a) {
             lightning *= 0.82f
         }
         line.xfermode = null
-    }
-
-    // ================================================================ INTERSTELLAR (Gargantua)
-    // The picture itself is ray-traced offline (tools/gargantua.py: Schwarzschild null geodesics, lensed star field,
-    // thin disc with Doppler/gravitational shift) and shipped as assets. At runtime the music drives brightness,
-    // bloom, a gravitational ripple and hot-spots that orbit the disc along the *real* lensed light paths.
-    private class Gar(
-        val discA: Bitmap, val discB: Bitmap, val stars: Bitmap, val glow: Bitmap,
-        val lut: ShortArray, val nr: Int, val nph: Int, val rin: Float, val rmax: Float
-    )
-
-    private val ihN2 = 150
-    private val ihX = FloatArray(ihN2) { rnd.nextFloat() }
-    private val ihY = FloatArray(ihN2) { rnd.nextFloat() }
-    private val ihP = FloatArray(ihN2) { rnd.nextFloat() }
-
-    @Volatile private var gar: Gar? = null
-    @Volatile private var garLoading = false
-    private val addP = Paint(Paint.FILTER_BITMAP_FLAG).apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.ADD) }
-    private val ripP = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; xfermode = PorterDuffXfermode(PorterDuff.Mode.ADD) }
-
-    private fun loadGar() {
-        if (gar != null || garLoading) return
-        garLoading = true
-        val ctx = context.applicationContext
-        Thread {
-            try {
-                val am = ctx.assets
-                val o = android.graphics.BitmapFactory.Options().apply { inScaled = false }
-                fun bmp(n: String): Bitmap = am.open(n).use { android.graphics.BitmapFactory.decodeStream(it, null, o)!! }
-                val bytes = am.open("gar_lut.bin").use { it.readBytes() }
-                val bb = java.nio.ByteBuffer.wrap(bytes).order(java.nio.ByteOrder.LITTLE_ENDIAN)
-                val k = bb.int; val nr = bb.int; val nph = bb.int; bb.int
-                val rin = bb.float; val rmax = bb.float
-                val lut = ShortArray(k * nr * nph * 2)
-                bb.asShortBuffer().get(lut)
-                gar = Gar(bmp("gar_disc_a.webp"), bmp("gar_disc_b.webp"), bmp("gar_stars.webp"), bmp("gar_glow.webp"), lut, nr, nph, rin, rmax)
-            } catch (e: Exception) {
-                android.util.Log.d("Gargantua", "asset load failed: $e")
-            }
-            garLoading = false
-        }.start()
-    }
-
-    // hot-spots: knots of plasma orbiting at ring radius r (in M), seen through the lens
-    private val hsN = 18
-    private val hsR = FloatArray(hsN)
-    private val hsPh = FloatArray(hsN)
-    private val hsAge = FloatArray(hsN)
-    private val hsDur = FloatArray(hsN)      // 0 = free slot
-    private val hsAmp = FloatArray(hsN)
-    private var ripple = -1f
-    private var garFlare = 0f
-    private val garPt = FloatArray(2)
-
-    private fun hsSpawn(rMin: Float, rMax: Float, amp: Float, dur: Float) {
-        for (i in 0 until hsN) if (hsDur[i] <= 0f) {
-            hsR[i] = rMin + (rMax - rMin) * rnd.nextFloat(); hsPh[i] = rnd.nextFloat() * TAU
-            hsAge[i] = 0f; hsDur[i] = dur; hsAmp[i] = amp
-            return
-        }
-    }
-
-    /** image position (in the 960x480 render, pixels) of ring radius r at disc azimuth ph, for image order k */
-    private fun garPos(g: Gar, k: Int, r: Float, ph: Float): Boolean {
-        val fr = (r - g.rin) / (g.rmax - g.rin) * g.nr - 0.5f
-        if (fr < -0.5f || fr > g.nr - 0.5f) return false
-        var fp = ph / TAU * g.nph - 0.5f
-        val i0 = Math.floor(fr.toDouble()).toInt(); val tr = fr - i0
-        val j0 = Math.floor(fp.toDouble()).toInt(); val tp = fp - j0
-        var sx = 0f; var sy = 0f; var sw = 0f
-        for (di in 0..1) for (dj in 0..1) {
-            val ri = (i0 + di).coerceIn(0, g.nr - 1)
-            val pj = ((j0 + dj) % g.nph + g.nph) % g.nph
-            val idx = ((k * g.nr + ri) * g.nph + pj) * 2
-            val x = g.lut[idx].toInt()
-            if (x == -32768) continue
-            val wgt = (if (di == 0) 1 - tr else tr) * (if (dj == 0) 1 - tp else tp)
-            sx += x / 8f * wgt; sy += g.lut[idx + 1] / 8f * wgt; sw += wgt
-        }
-        if (sw < 0.45f) return false
-        garPt[0] = sx / sw; garPt[1] = sy / sw
-        return true
-    }
-
-    private fun interstellar(c: Canvas, w: Float, hh: Float, hit: Boolean) {
-        c.drawColor(Color.rgb(0, 0, 2))
-        loadGar()
-        val amb = ambient != -1          // screensaver: the black hole gets the whole screen
-        val sc = hh / 1080f * (if (amb) 1.7f else 1.3f) * (1f + 0.010f * bass + 0.018f * beat)
-        val cx = w * (if (amb) 0.5f else 0.55f)
-        val cy = hh * (if (amb) 0.47f else 0.385f)
-        val left = cx - 480f * sc; val right = cx + 480f * sc
-        val top = cy - 240f * sc; val bot = cy + 240f * sc
-
-        // a few plain stars outside the traced area
-        line.style = Paint.Style.FILL
-        line.xfermode = null
-        for (i in 0 until ihN2) {
-            val x = ihX[i] * w; val y = ihY[i] * hh
-            if (x > left - 6f && x < right + 6f && y > top - 6f && y < bot + 6f) continue
-            val tw = 0.5f + 0.5f * sin(t * (0.5f + ihP[i] * 1.2f) + ihP[i] * 40f)
-            line.color = withA(Color.rgb(215, 228, 255), (45 + 120 * tw * (0.55f + 0.45f * treble)).toInt())
-            c.drawCircle(x, y, max(1.2f, hh * 0.0019f * (0.5f + ihP[i])), line)
-        }
-        val g = gar ?: return
-
-        // events
-        if (hit) {
-            garFlare = 1f; ripple = 0f
-            hsSpawn(2.6f, 5.5f, 1f, 5.5f)
-            if (beat > 0.8f) hsSpawn(3f, 8f, 0.8f, 6f)
-        }
-        garFlare *= 0.9f
-        if (treble > 0.3f && rnd.nextFloat() < 0.05f) hsSpawn(6f, 12f, 0.5f, 7f)
-        var alive = 0
-        for (i in 0 until hsN) if (hsDur[i] > 0f) alive++
-        if (alive < 4 && rnd.nextFloat() < 0.04f) hsSpawn(3f, 9f, 0.55f, 9f)
-
-        // layers: stars, wide halo, disc (two plasma textures cross-fading slowly)
-        rect.set(left, top, right, bot)
-        addP.alpha = (205 + 50 * treble).toInt().coerceIn(0, 255)
-        c.drawBitmap(g.stars, null, rect, addP)
-        addP.alpha = (95 + 110 * bass + 80 * garFlare).toInt().coerceIn(0, 255)
-        c.drawBitmap(g.glow, null, rect, addP)
-        val mixB = 0.5f + 0.5f * sin(t * 0.33f)
-        val base = 0.88f + 0.12f * min(1f, bass * 1.3f)
-        addP.alpha = (255 * base * (1f - mixB)).toInt().coerceIn(0, 255)
-        c.drawBitmap(g.discA, null, rect, addP)
-        addP.alpha = (255 * base * mixB).toInt().coerceIn(0, 255)
-        c.drawBitmap(g.discB, null, rect, addP)
-        if (garFlare > 0.05f) {            // the kick: the whole lensed ring flares
-            addP.alpha = (garFlare * (70 + 50 * bass)).toInt().coerceIn(0, 255)
-            c.drawBitmap(g.discA, null, rect, addP)
-        }
-
-        // gravitational ripple leaving the hole on each kick
-        if (ripple >= 0f) {
-            ripple += dtF * 0.55f
-            if (ripple > 1f) ripple = -1f
-            else {
-                val R = 92f * sc * (1.15f + 1.9f * ripple)
-                val a = (1f - ripple) * (1f - ripple)
-                ripP.strokeWidth = max(2f, hh * 0.004f)
-                ripP.color = withA(Color.rgb(255, 196, 120), (a * 54).toInt())
-                c.drawCircle(cx, cy, R, ripP)
-                ripP.strokeWidth = max(5f, hh * 0.012f)
-                ripP.color = withA(Color.rgb(255, 150, 70), (a * 14).toInt())
-                c.drawCircle(cx, cy, R, ripP)
-            }
-        }
-
-        // hot-spots orbiting along the lensed light paths (primary image k=0, lens-bent copy k=1)
-        for (i in 0 until hsN) {
-            if (hsDur[i] <= 0f) continue
-            hsAge[i] += dtF
-            if (hsAge[i] > hsDur[i]) { hsDur[i] = 0f; continue }
-            val om = 2f * PI.toFloat() / 3.4f * (hsR[i] / 3f).pow(-1.5f)
-            hsPh[i] = (hsPh[i] - om * dtF + TAU) % TAU                  // clockwise: the approaching side is on the right
-            val life = hsAge[i] / hsDur[i]
-            val fade = min(1f, hsAge[i] / 0.5f) * (1f - life) * (1f - life * 0.3f)
-            for (k in 0..1) for (j in 0..9) {
-                val ph = (hsPh[i] + j * 0.05f / (0.5f + 0.25f * hsR[i]) + TAU) % TAU
-                if (!garPos(g, k, hsR[i], ph)) continue
-                val tr = 1f - j / 10f
-                val al = hsAmp[i] * fade * tr * tr * (if (k == 0) 1f else 0.8f)
-                val x = cx + (garPt[0] - 480f) * sc
-                val y = cy + (garPt[1] - 240f) * sc
-                val rad = hh * (0.0075f + 0.007f * hsAmp[i]) * (0.55f + 0.45f * tr)
-                spr(c, x, y, rad * 2.6f, fireP[0], (al * 120).toInt())
-                if (j < 4) spr(c, x, y, rad * 0.9f, fireP[1], (al * 235).toInt())
-            }
-        }
     }
 
 }

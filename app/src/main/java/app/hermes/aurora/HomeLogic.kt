@@ -16,6 +16,24 @@ internal object HomeLogic {
     /** A style stored by an older version (0 Classic, 1 Cinema, 2 Horizon, 3 Command) as one of today's two. */
     fun migrateStyle(old: Int): Int = if (old <= 1) MARQUEE else DRIFT
 
+    /**
+     * A visualizer number stored before six of them were removed (0 Off, 1 Flow, 2 Orb, 3 Stardust, 4 Silk, 5 Pixels,
+     * 6 Wave, 7 Desert, 8 Cyberpunk, 9 Tron Legacy, 10 Matrix, 11 Blade Runner, 12 Interstellar) as today's
+     * (0 Off, 1 Flow, 2 Pixels, 3 Wave, 4 Desert, 5 Cyberpunk, 6 Blade Runner). A removed music visualizer becomes
+     * Flow, a removed scene becomes Blade Runner; the screensaver's "rotate" (-1) stays.
+     */
+    fun migrateVisualizer(old: Int): Int = when (old) {
+        -1 -> -1
+        0 -> 0
+        1, 2, 3, 4 -> 1
+        5 -> 2
+        6 -> 3
+        7 -> 4
+        8 -> 5
+        9, 10, 11, 12 -> 6
+        else -> 0
+    }
+
     // ---------------------------------------------------------------- lanes
 
     class Lane(

@@ -11,7 +11,7 @@ It is a personal project, built and tested on a Xiaomi TV Box S (3rd gen, Androi
 - Themes and six icon styles (Original, Round, Mono, Neon, Duotone, Glass), all generated on the device. App names are always shown next to the icons.
 - **Now Playing:** any app with a media session (Spotify, YouTube Music, VLC, AirPlay ...) gets a card with cover, progress and Prev / Play-Pause / Next / Stop.
 - **Spotify shelves:** playlists, albums and artists from Spotify's own Android TV home channel, opened by deep link (no account or API key needed inside Aurora).
-- **Music visualizer** that follows the audio output and takes its colours from the playing cover: Flow, Orb, Stardust, Silk, Pixels, Wave, and the scenes Desert, Cyberpunk, Tron Legacy, Matrix, Blade Runner and Interstellar (a ray-traced black hole). Optional auto-rotation per track or on a timer.
+- **Music visualizer** that follows the audio output and takes its colours from the playing cover: Flow, Pixels, Wave, and the scenes Desert, Cyberpunk and Blade Runner. Optional auto-rotation per track or on a timer.
 - **Screensaver:** after a few idle minutes a visualizer scene runs full-screen with a clock and the current track.
 - **Home button:** an accessibility service makes the Home key open Aurora instead of the stock launcher; hold Home for the stock home.
 - **Built-in AirPlay receiver** (screen mirroring, audio, video), see below.
@@ -49,7 +49,7 @@ To update, install the new APK over the old one: settings and hidden apps are ke
 
 The standalone AirPlay receiver is not needed any more, Aurora has it built in. Its own APK is on the [upstream releases page](https://github.com/jqssun/android-airplay-server/releases).
 
-**Works right after installing:** the home styles, themes, icon styles, weather, hidden apps, settings backup, the screensaver and the visualizer scenes (Desert, Cyberpunk, Tron Legacy, Matrix, Blade Runner, Interstellar), which also animate on their own when nothing plays.
+**Works right after installing:** the home styles, themes, icon styles, weather, hidden apps, settings backup, the screensaver and the visualizer scenes (Desert, Cyberpunk, Blade Runner), which also animate on their own when nothing plays.
 
 <details>
 <summary><b>Optional extras that need a one-time command from a computer</b></summary>
@@ -69,7 +69,7 @@ The grants survive updates. Do not `pm clear` Aurora: that wipes the hidden apps
 
 ## Tools
 
-`tools/` holds the offline renderers for the visualizer backdrops (Python with numpy, scipy and Pillow): `gargantua.py` (ray-traced black hole), `bladerunner.py` and `tron.py`. Their output goes to `app/src/main/assets`.
+`tools/` holds the offline renderer for the Blade Runner backdrop (`bladerunner.py`, Python with numpy, scipy and Pillow). Its output goes to `app/src/main/assets`.
 
 ## Not done / known limits
 
